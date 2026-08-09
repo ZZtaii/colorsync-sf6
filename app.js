@@ -510,6 +510,10 @@ function showTemporaryStatus(el, kind, text, duration = 12000) {
 }
 
 function revealExportStatus(el) {
+    revealStatus(el);
+}
+
+function revealStatus(el) {
     if (!el) return;
     requestAnimationFrame(() => {
         el.scrollIntoView({
@@ -778,6 +782,7 @@ async function handleFiles(fileCollection) {
             rejectedIncoming[0]?.reason || "No valid CMD files selected.",
         );
         parserPanel?.classList.remove("hidden");
+        revealStatus(parserStatus);
         return;
     }
 
@@ -820,6 +825,7 @@ async function handleFiles(fileCollection) {
             || "No CMD files matched the current character/outfit.",
         );
         parserPanel?.classList.remove("hidden");
+        revealStatus(parserStatus);
         return;
     }
 
@@ -927,9 +933,10 @@ async function handleFiles(fileCollection) {
 
     showStatus(
         parserStatus,
-        addedCount > 0 ? "good" : "warn",
+        skipCount > 0 ? "warn" : (addedCount > 0 ? "good" : "warn"),
         msg,
     );
+    revealStatus(parserStatus);
 }
 
 
@@ -3026,6 +3033,7 @@ function bindUi() {
             console.error(error);
             showStatus(parserStatus, "bad", error.message || String(error));
             parserPanel?.classList.remove("hidden");
+            revealStatus(parserStatus);
         }
     });
 
@@ -3036,6 +3044,7 @@ function bindUi() {
             console.error(error);
             showStatus(parserStatus, "bad", error.message || String(error));
             parserPanel?.classList.remove("hidden");
+            revealStatus(parserStatus);
         } finally {
             fileInput.value = "";
         }

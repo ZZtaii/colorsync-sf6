@@ -63,8 +63,8 @@ browsers. Firefox uses its standard download flow instead.
 
 ## Project credits
 
-- RSZ understanding: [REasy](https://github.com/seifhassine/REasy) and its
-  contributors.
+- RSZ and CMD color-data understanding:
+  [REasy](https://github.com/seifhassine/REasy).
 - ZIP generation: [fflate](https://github.com/101arrowz/fflate).
 
 ## License
