@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Learn how to edit, sync, replace, and export Street Fighter 6 CMD palette colors with SF6 CMD Color Sync.">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://colorsync-sf6.pages.dev/features">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="SF6 CMD Color Sync">
+    <meta property="og:title" content="SF6 CMD Color Sync Feature Guide">
+    <meta property="og:description" content="A visual guide to editing, syncing, replacing, and exporting Street Fighter 6 CMD palette colors.">
+    <meta property="og:url" content="https://colorsync-sf6.pages.dev/features">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="SF6 CMD Color Sync Feature Guide">
+    <meta name="twitter:description" content="A visual guide to editing, syncing, replacing, and exporting Street Fighter 6 CMD palette colors.">
+    <title>Feature Guide — SF6 CMD Color Sync</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --page: #151922;
+            --surface: #252c38;
+            --surface-soft: #1d232d;
+            --line: rgba(151, 174, 220, .24);
+            --text: #edf1f8;
+            --muted: #b7c2d7;
+            --blue: #7ea7ff;
+            --blue-soft: rgba(126, 167, 255, .16);
+            --purple: #7f86ff;
+            --green: #66c69a;
+            --orange: #f2b56a;
+            --red: #e68183;
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; background: radial-gradient(circle at 15% 0%, #213755 0, var(--page) 36rem); color: var(--text); font: 16px/1.55 Inter, ui-sans-serif, system-ui, sans-serif; }
+        a { color: var(--blue); }
+        .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+        .top { padding: 20px 0; border-bottom: 1px solid var(--line); }
+        .back { font-weight: 700; text-decoration: none; }
+        .hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px 48px; padding: 58px 0 48px; }
+        .hero::after { content: ""; position: absolute; inset: 38px 0 28px; z-index: -1; border: 1px solid rgba(126, 167, 255, .18); border-radius: 24px; background: linear-gradient(115deg, rgba(47, 76, 116, .34), rgba(29, 35, 45, .12) 62%); }
+        .hero-copy { padding: 28px 30px 0; max-width: 850px; }
+        .hero-aside { align-self: end; display: grid; gap: 8px; min-width: 188px; padding: 0 30px 30px 0; }
+        .hero-aside span { padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(11, 16, 25, .22); color: var(--muted); font-size: .84rem; font-weight: 700; }
+        .hero-aside b { color: var(--blue); font-weight: 800; }
+        .eyebrow { color: var(--blue); font-size: .78rem; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+        h1, h2, h3, p { margin-top: 0; }
+        h1 { margin: 10px 0 18px; font-size: clamp(2.45rem, 5.2vw, 4.25rem); line-height: 1.04; letter-spacing: -.045em; }
+        h1 span { display: block; color: var(--blue); }
+        h2 { margin-bottom: 10px; font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.025em; }
+        h3 { font-size: 1rem; margin-bottom: 8px; }
+        .lead { color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.25rem); }
+        .section { padding: 44px 0; border-top: 1px solid var(--line); }
+        .section-intro { max-width: 760px; color: var(--muted); }
+        .workflow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 26px; }
+        .step, .feature-card, .rule, .screenshot-slot { border: 1px solid var(--line); background: linear-gradient(145deg, rgba(48, 57, 72, .96), var(--surface-soft)); border-radius: 18px; }
+        .step { position: relative; min-height: 150px; padding: 20px; }
+        .step:not(:last-child)::after { content: "→"; position: absolute; right: -13px; top: 50%; z-index: 2; transform: translateY(-50%); width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--blue); color: #13203a; font-weight: 900; }
+        .num { color: var(--blue); font-size: .78rem; font-weight: 800; }
+        .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 28px; }
+        .feature-layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(270px, .9fr); gap: 28px; align-items: start; margin-top: 24px; }
+        .feature-card { padding: 25px; }
+        .diagram { margin: 22px 0 18px; display: grid; gap: 9px; }
+        .node { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--blue-soft); border: 1px solid rgba(126, 167, 255, .32); }
+        .node strong { display: block; }
+        .node small { color: var(--muted); }
+        .node.source { background: rgba(102, 198, 154, .12); border-color: rgba(102, 198, 154, .36); }
+        .node.target { background: rgba(242, 181, 106, .11); border-color: rgba(242, 181, 106, .35); }
+        .node.inactive { opacity: .66; background: rgba(230, 129, 131, .10); border-color: rgba(230, 129, 131, .38); }
+        .arrow { text-align: center; color: var(--blue); font-weight: 800; line-height: 1; }
+        .fan { display: grid; grid-template-columns: 1fr 28px 1fr; align-items: center; gap: 8px; }
+        .fan .arrow { font-size: 1.6rem; }
+        .mini-stack { display: grid; gap: 8px; }
+        .mini-node { padding: 9px 10px; border-radius: 10px; background: rgba(242, 181, 106, .11); border: 1px solid rgba(242, 181, 106, .30); font-size: .88rem; }
+        .caption { color: var(--muted); font-size: .94rem; }
+        .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 20px; }
+        .comparison.one-cmd { grid-template-columns: 1fr; }
+        .palette { padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: rgba(8, 12, 19, .24); }
+        .palette-title { color: var(--muted); font-size: .82rem; font-weight: 700; }
+        .swatches { display: flex; gap: 8px; margin-top: 12px; }
+        .swatch { width: 31px; height: 31px; border-radius: 9px; border: 2px solid rgba(255,255,255,.38); }
+        .rule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin-top: 25px; }
+        .rule { padding: 20px; }
+        .rule-icon { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 14px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-weight: 900; }
+        .screenshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 25px; }
+        .screenshot-slot { min-height: 210px; display: grid; place-items: center; padding: 24px; text-align: center; border-style: dashed; color: var(--muted); }
+        .screenshot-slot b { display: block; color: var(--text); margin-bottom: 5px; }
+        .ui-shot { min-height: 0; padding: 0; overflow: hidden; border-style: solid; align-content: start; }
+        .ui-shot img { display: block; width: 100%; height: auto; }
+        .ui-shot figcaption { width: 100%; padding: 12px 15px; border-top: 1px solid var(--line); }
+        .filename-guide { width: min(100%, 720px); margin: 24px auto 0; overflow: hidden; }
+        .filename-guide img { display: block; width: 100%; height: auto; }
+        .filename-guide figcaption { padding: 14px 18px; border-top: 1px solid var(--line); color: var(--muted); }
+        .filename-guide b { color: var(--text); }
+        .footer { padding: 44px 0 60px; color: var(--muted); }
+        @media (max-width: 760px) {
+            .wrap { width: min(100% - 28px, 1120px); }
+            .hero { grid-template-columns: 1fr; gap: 20px; padding: 36px 0 38px; }
+            .hero::after { inset: 24px 0 20px; border-radius: 18px; }
+            .hero-copy { padding: 24px 22px 0; }
+            .hero-aside { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; padding: 0 22px 22px; }
+            .workflow, .cards, .comparison, .rule-grid, .screenshot-grid, .feature-layout { grid-template-columns: 1fr; }
+            .step:not(:last-child)::after { top: auto; bottom: -13px; right: 50%; transform: translateX(50%) rotate(90deg); }
+        }
+    </style>
+</head>
+<body>
+    <header class="top"><div class="wrap"><a class="back" href="../">← Back to SF6 CMD Color Sync</a></div></header>
+    <main class="wrap">
+        <section class="hero">
+            <div class="hero-copy">
+                <div class="eyebrow">Feature guide</div>
+                <h1>Change a palette once.<span>Apply it where it belongs.</span></h1>
+                <p class="lead">Edit CMD palette files locally, inspect every slot, and export only the changes you intend.</p>
+            </div>
+            <div class="hero-aside" aria-label="Guide highlights">
+                <span><b>8 features</b><br>shown step by step</span>
+                <span><b>Browser-only</b><br>your files stay local</span>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="eyebrow">The overall flow</div>
+            <h2>From CMD file to ready-to-install mod</h2>
+            <div class="workflow">
+                <div class="step"><div class="num">01</div><h3>Load</h3><p>Drop CMD files for one character and outfit.</p></div>
+                <div class="step"><div class="num">02</div><h3>Inspect</h3><p>See material color slots, values, and inactive slots.</p></div>
+                <div class="step"><div class="num">03</div><h3>Edit or sync</h3><p>Make a direct edit, copy a color, or repeat a pattern.</p></div>
+                <div class="step"><div class="num">04</div><h3>Export</h3><p>Download CMDs or build a game-ready ZIP.</p></div>
+            </div>
+        </section>
+
+        <section class="section" id="cmd-filename-guide">
+            <div class="eyebrow">Good to know</div>
+            <h2>Choose the CMD file you actually want to edit</h2>
+            <p class="section-intro">Before uploading, check the filename: it tells you the character, outfit, and color number. Upload CMD files for one character and one outfit at a time. You can upload multiple color variants together.</p>
+            <figure class="screenshot-slot ui-shot filename-guide"><img src="../data/cmd-filename-guide.webp" alt="Guide showing that esf009_002_cmd_001.user.2 means Cammy, Outfit 2, Color 1."></figure>
+        </section>
+
+        <section class="section" id="direct-editing">
+            <div class="eyebrow">Feature 1</div>
+            <h2>Direct editing</h2>
+            <div class="feature-layout"><div><p class="section-intro">Choose an active CMD, open a material in Parsed Color Data, and edit a single CustomizeColor slot. The change affects only that palette and stays staged until you export it or revert it.</p><div class="diagram"><div class="node source"><span><strong>Active CMD</strong><small>Open one material and select a color slot</small></span></div><div class="arrow">&darr; edit RGBA</div><div class="node target"><span><strong>That one slot changes</strong><small>Other CMD files are untouched</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/direct-editing-ui.webp" alt="Parsed Color Data for Mai C1 Color 2 with Body00 expanded and the teal CustomizeColor_1 editor open."><figcaption><b>Direct color edit</b>Open a slot's picker to set its exact RGBA value; inactive slots remain clearly marked.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="color-sync">
+            <div class="eyebrow">Feature 2</div>
+            <h2>Color Sync</h2>
+            <div class="feature-layout"><div><p class="section-intro">Use Color Sync to copy one source slot to one or more target slots in the active CMD. You can copy across materials and across CustomizeColor indexes. Every selected target receives the source slot's exact RGBA value.</p><div class="diagram" aria-label="Color Sync diagram"><div class="node source"><span><strong>Active CMD source</strong><small>Body00 &middot; CustomizeColor_1</small></span><span class="swatch" style="background:#4f89d6"></span></div><div class="arrow">&darr; exact RGBA value</div><div class="fan"><div class="node target"><span><strong>Target material</strong><small>Trim00</small></span></div><div class="arrow">&rarr;</div><div class="mini-stack"><div class="mini-node">CustomizeColor_2</div><div class="mini-node">CustomizeColor_4</div></div></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/color-sync-ui.webp" alt="Color Sync panel with Mai C1 Color 2, a yellow source slot, and two teal Body00 target slots selected."><figcaption><b>Color Sync panel</b>Copy the active CMD's yellow source color into the two selected Body00 target slots.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="pattern-sync">
+            <div class="eyebrow">Feature 3</div>
+            <h2>Pattern Sync</h2>
+            <div class="feature-layout"><div><p class="section-intro">Apply one mapping to the selected <strong>Color 4 CMD</strong>.</p><div class="diagram" aria-label="Pattern Sync example for Color 4"><div class="node source"><span><strong>Color 4 source</strong><small>esf_ClothB_Chaps &middot; CustomizeColor_0</small></span><span class="swatch" style="background:#400082"></span></div><div class="arrow">&darr; exact RGBA value</div><div class="fan"><div class="node target"><span><strong>Target material</strong><small>esf_ClothB_Tights</small></span></div><div class="arrow">&rarr;</div><div class="mini-stack"><div class="mini-node">CustomizeColor_0</div></div></div></div><p class="caption">Color 4's Chaps color is copied to its Tights slot.</p><p class="caption"><strong>Across multiple CMDs:</strong> the same mapping is repeated, but each CMD reads its own ClothB_Chaps color and applies it to the selected slots in its own target material.</p></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/pattern-sync-ui.webp" alt="Pattern Sync panel with a dark-indigo Chaps source, the Tights CustomizeColor_0 target selected, and Color 4 checked as the target CMD."><figcaption><b>Pattern Sync panel</b>Map Chaps CustomizeColor_0 to the selected Tights slot, select Color 4, then apply.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="replace-everywhere">
+            <div class="eyebrow">Feature 4</div>
+            <h2>Replace Color Everywhere</h2>
+            <div class="feature-layout"><div><p class="section-intro">Choose a Find Color and a Replace With color. The tool searches editable slots in the active CMD only, then replaces slots whose full RGBA value exactly matches the find color. Other loaded CMDs are not changed.</p><div class="diagram"><div class="node source"><span><strong>Find exact RGBA</strong><small>For example: #4F89D6FF</small></span></div><div class="arrow">&darr; matching slots in active CMD only</div><div class="node target"><span><strong>Replace with new RGBA</strong><small>Every exact match is staged for review</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/replace-everywhere-ui.webp" alt="Replace Color Everywhere panel showing four matching Color 5 slots replaced from indigo to muted red."><figcaption><b>Replace Everywhere panel</b>The result lists the four exact RGBA matches staged in the active Color 5 CMD.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="custom-reference-images">
+            <div class="eyebrow">Feature 5</div>
+            <h2>Add your own reference images</h2>
+            <div class="feature-layout"><div><p class="section-intro">Use the <strong>+</strong> button in the reference viewer to add your own PNG, JPG, or WebP image. It is useful for a custom mod preview, a color idea, or any visual reference you want to keep beside the editor. Added images stay local to your browser session.</p><div class="diagram"><div class="node source"><span><strong>Open the reference viewer</strong><small>Hover it to reveal the controls</small></span></div><div class="arrow">&darr; choose + Add image</div><div class="node target"><span><strong>Your reference joins the viewer</strong><small>Use the arrows or Left/Right keys to browse it</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/custom-reference-images-ui.webp" alt="SF6 CMD Color Sync with a custom Chun-Li reference image added to the reference viewer."><figcaption><b>Custom reference image</b>Add a personal visual reference from the viewer’s + button.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="inactive-slots">
+            <div class="eyebrow">Feature 6</div>
+            <h2>Inactive slot handling</h2>
+            <div class="feature-layout"><div><p class="section-intro">An inactive slot cannot be used as a Color Sync source, and Pattern Sync skips inactive sources. This avoids copying a color from a part of the palette that the CMD has turned off. When a sync writes to a target with an enable field, the target is enabled where possible.</p><div class="diagram"><div class="node inactive"><span><strong>Inactive source</strong><small>Cannot be copied</small></span><span>&times;</span></div><div class="arrow">&darr;</div><div class="node source"><span><strong>Active source</strong><small>Safe to sync</small></span><span>&check;</span></div><div class="arrow">&darr;</div><div class="node target"><span><strong>Target slot</strong><small>Receives color and is enabled when supported</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/direct-editing-ui.webp" alt="Parsed color slots including an inactive CustomizeColor row."><figcaption><b>Inactive indicator</b>The inactive badge makes slots that cannot be used as sources easy to spot.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="review-changes">
+            <div class="eyebrow">Feature 7</div>
+            <h2>Current Changes and revert</h2>
+            <div class="feature-layout"><div><p class="section-intro">Every direct edit, sync, and replacement is staged. Current Changes shows what will be exported so you can inspect an individual result, edit again, revert one change, or revert everything before creating files.</p><div class="diagram"><div class="node source"><span><strong>Staged edits</strong><small>Direct edit, Color Sync, Pattern Sync, or replace</small></span></div><div class="arrow">&darr; review</div><div class="node"><span><strong>Keep or revert</strong><small>Nothing is exported until you choose to export</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/current-changes-ui.webp" alt="Current Changes panel showing four staged Color 5 replacements with a Revert button for each slot."><figcaption><b>Current Changes</b>Review every staged slot change and revert any individual result before export.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="export">
+            <div class="eyebrow">Feature 8</div>
+            <h2>Export CMD files or a mod ZIP</h2>
+            <div class="feature-layout"><div><p class="section-intro">Export modified CMD files directly, or build a game-ready mod ZIP with the expected game path and mod information. Additional file options can save to a chosen folder in supported Chromium browsers; otherwise exports use the browser's normal download flow.</p><div class="diagram"><div class="node source"><span><strong>Reviewed staged changes</strong><small>One or more edited CMD files</small></span></div><div class="arrow">&darr; choose export type</div><div class="fan"><div class="node target"><span><strong>Modified CMDs</strong><small>Browser download or saved folder</small></span></div><div class="arrow">or</div><div class="node target"><span><strong>Mod ZIP</strong><small>Ready for installation</small></span></div></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/export-result.webp" alt="Mai wearing the final exported color mod in Street Fighter 6."><figcaption><b>Final result in game</b>The exported mod applied successfully.</figcaption></figure></div>
+        </section>
+    </main>
+    <footer class="footer"><div class="wrap"><a class="back" href="../">&larr; Back to SF6 CMD Color Sync</a></div></footer>
+</body>
+</html>
