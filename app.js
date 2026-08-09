@@ -509,6 +509,16 @@ function showTemporaryStatus(el, kind, text, duration = 12000) {
     statusHideTimers.set(el, timer);
 }
 
+function revealExportStatus(el) {
+    if (!el) return;
+    requestAnimationFrame(() => {
+        el.scrollIntoView({
+            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+            block: "center",
+        });
+    });
+}
+
 function listExportNames(items) {
     const names = items.map(item => `“${item.filename}”`);
     if (names.length <= 2) return names.join(" and ");
@@ -3235,6 +3245,7 @@ function bindUi() {
                 "good",
                 describeCmdExport(exported),
             );
+            revealExportStatus(exportCmdStatus);
         } catch (error) {
             console.error(error);
             showStatus(exportCmdStatus, "bad", error.message || String(error));
@@ -3250,6 +3261,7 @@ function bindUi() {
                 "good",
                 describeZipExport(result),
             );
+            revealExportStatus(buildStatus);
         } catch (error) {
             console.error(error);
             showStatus(buildStatus, "bad", error.message || String(error));
