@@ -89,8 +89,8 @@ const SF6_CHARACTERS = {
 
 
 const CMD_NAME_RE =
-    /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex|dx)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
-const CMD_VARIANT_ORDER = { standard: 0, ex: 1, dx: 2 };
+    /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
+const CMD_VARIANT_ORDER = { standard: 0, ex: 1 };
 
 
 // ============================================================
@@ -606,6 +606,14 @@ async function validateFile(file) {
             ok: false,
             file,
             reason: "Filename is not a valid SF6 CMD file.",
+        };
+    }
+
+    if (metadata.paletteNumber === 0) {
+        return {
+            ok: false,
+            file,
+            reason: "Color 000 is empty and cannot be edited.",
         };
     }
 
@@ -2885,6 +2893,10 @@ function renderSyncPanels() {
 
     // ---- Pattern Sync
     const ps = state.patternSync;
+    const patternReferenceLabel = document.querySelector("#pattern-reference-label");
+    if (patternReferenceLabel) {
+        patternReferenceLabel.textContent = activeLabel;
+    }
 
     ps.sourceMaterial = buildMaterialDropdown(
         document.querySelector("#pattern-source-material"),
@@ -2943,7 +2955,7 @@ function renderSyncPanels() {
     const patternNote = document.querySelector("#pattern-source-note");
     if (patternNote) {
         patternNote.textContent =
-            "Each selected CMD uses its own color from this material/slot.";
+            "This CMD provides the controls and preview. Each selected CMD uses its own color from this material/slot.";
     }
 
     const patternTargetSlots = listSlots(activeCmd, ps.targetMaterial);
