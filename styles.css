@@ -4583,6 +4583,11 @@ body.is-resizing-reference {
     pointer-events: none !important;
 }
 
+/* Center the smaller official credit against the larger caption title. */
+#reference-viewer .reference-viewer-caption {
+    align-items: center !important;
+}
+
 #reference-viewer .reference-viewer-arrow svg {
     width: 14px !important;
     height: 14px !important;
@@ -4602,14 +4607,16 @@ body.is-resizing-reference {
     pointer-events: none !important;
 }
 
-/* Official reference credit: revealed with the viewer's existing hover chrome. */
+/* Official reference credit: aligned to the caption title at a quieter scale. */
 #reference-viewer .reference-viewer-credit {
     flex: 0 0 auto;
-    color: rgba(232, 237, 247, 0.76);
-    font-size: 0.68rem;
+    align-self: center;
+    color: rgba(232, 237, 247, 0.56);
+    font-size: 0.48rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     white-space: nowrap;
+    pointer-events: none;
 }
 
 #reference-viewer .reference-viewer-credit[hidden] {
