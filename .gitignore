@@ -1,0 +1,84 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.Spotlight-V100
+.Trashes
+.vscode/
+.idea/
+.fleet/
+*.swp
+*~
+
+# Local agent instructions and workspace state
+AGENTS.md
+HOSTING.md
+.agents/
+.codex/
+
+# Local / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Dependencies (none yet; keep ready)
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build / deploy artifacts
+dist/
+build/
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.vite/
+.turbo/
+.next/
+.svelte-kit/
+.astro/
+.vercel/
+.wrangler/
+.cloudflare/
+wrangler.toml.bak
+*.tsbuildinfo
+
+# Large binary dumps that should not thrash git history
+# The app uses the tracked minimal registry; keep the original full dump local.
+data/rszsf6.json
+
+# Local CMD palette samples / exports
+data/*.user.*
+
+# Local character color folders
+SF6 Colors/
+
+# Local source images retained for editing
+source-images/
+
+# Local validation that requires private registry and palette samples
+scripts/smoke-parse.mjs
+
+# Local scripts
+scripts/
+
+# Temporary
+*.log
+tmp/
+temp/
+
+# Local UI capture artifacts
+.playwright-mcp/
+ui-*.png
+page-*.yml
+playwright-report/
+test-results/
+blob-report/

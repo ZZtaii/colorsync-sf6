@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <meta
+        name="description"
+        content="Edit, sync, and export Street Fighter 6 CMD palette files directly in your browser. Build modified CMD files or game-ready mod ZIPs without uploading your files."
+    >
+
+    <meta name="robots" content="index,follow">
+    <meta name="theme-color" content="#151922">
+    <link rel="canonical" href="https://colorsync-sf6.pages.dev/">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="SF6 CMD Color Sync">
+    <meta property="og:title" content="SF6 CMD Color Sync — Street Fighter 6 Palette Editor">
+    <meta property="og:description" content="Edit, sync, and export Street Fighter 6 CMD palette files locally in your browser.">
+    <meta property="og:url" content="https://colorsync-sf6.pages.dev/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="SF6 CMD Color Sync — Street Fighter 6 Palette Editor">
+    <meta name="twitter:description" content="Edit, sync, and export Street Fighter 6 CMD palette files locally in your browser.">
+
+    <title>SF6 CMD Color Sync — Street Fighter 6 Palette Editor</title>
+
+    <link rel="icon" type="image/svg+xml" href="./data/favicon.svg">
+
+    <link
+        rel="stylesheet"
+        href="./styles.css"
+    >
+
+    <script type="application/ld+json">
+        {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": "SF6 CMD Color Sync",
+            "applicationCategory": "UtilitiesApplication",
+            "operatingSystem": "Web browser",
+            "description": "A browser-based editor for Street Fighter 6 CMD palette files. Edit, synchronize, and export colors locally.",
+            "url": "https://colorsync-sf6.pages.dev/"
+        }
+    </script>
+</head>
+
+<body>
+
+    <header class="site-header">
+        <div class="page-width site-header-content">
+            <div class="site-title-row">
+                <div>
+                    <div class="site-kicker">Street Fighter 6 Color Sync Tool</div>
+                    <h1>SF6 CMD <span>Color Sync</span></h1>
+                    <p class="subtitle">Edit, synchronize, and export Street Fighter 6 colors directly in your browser.</p>
+                </div>
+            </div>
+            <div class="privacy-note"><span class="privacy-dot"></span>Files are processed locally. Nothing is uploaded.</div>
+        </div>
+    </header>
+
+
+    <main class="page-width">
+
+        <!-- ==================================================
+             FILE INPUT
+             ================================================== -->
+
+        <section
+            class="panel"
+            id="file-panel"
+        >
+            <div class="section-title"><span class="section-number">1</span><div><h2>Select CMD Files</h2><p class="section-description">
+                Load one or more CMD color files from the same character and outfit.
+            </p></div></div>
+
+            <div
+                id="drop-zone"
+                class="drop-zone"
+                tabindex="0"
+                role="button"
+                ondragover="event.preventDefault()"
+                ondrop="event.preventDefault()"
+            >
+                <strong>
+                    Drop CMD files here
+                </strong>
+
+                <span>
+                    or click to choose files
+                </span>
+
+                <input
+                    id="file-input"
+                    type="file"
+                    multiple
+                    hidden
+                >
+            </div>
+
+            <div
+                id="file-summary"
+                class="file-summary hidden"
+            >
+                <h3>Detected Files</h3>
+
+                <div id="detected-character">
+                </div>
+
+                <button id="unload-all-cmds" type="button" class="secondary-button" disabled>
+                    Unload All
+                </button>
+
+                <div id="file-list">
+                </div>
+            </div>
+        </section>
+
+
+        <!-- ==================================================
+             PARSER STATUS
+             ================================================== -->
+
+        <section
+            class="panel hidden"
+            id="parser-panel"
+        >
+            <div class="section-title">
+                <span class="section-number">2</span>
+                <div>
+                    <h2>Parsed Color Data</h2>
+                    <p class="section-description">
+                        Choose the active CMD, then inspect and edit its material color slots.
+                    </p>
+                </div>
+            </div>
+
+            <div
+                id="parser-status"
+                class="status-box"
+            >
+            </div>
+
+            <div
+                id="multi-cmd-inspector-notice"
+                class="status-box warn hidden"
+            >
+                Multiple CMD files loaded. Select an active color to inspect and edit.
+            </div>
+
+            <div
+                id="cmd-inspector-controls"
+                class="cmd-inspector-controls hidden"
+            >
+                <div class="cmd-inspector-picker">
+                    <span>Active color</span>
+                    <div id="active-cmd-select" class="custom-select active-cmd-select">
+                        <button type="button" class="custom-select-trigger" aria-label="Active color" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="cs-text">Select an active color</span>
+                            <span class="cs-arrow">▼</span>
+                        </button>
+                        <div class="custom-select-dropdown hidden" role="listbox"></div>
+                    </div>
+                </div>
+
+                <div class="cmd-inspector-actions">
+                    <button
+                        id="save-cmd-inspector"
+                        type="button"
+                        class="secondary-button"
+                        disabled
+                    >
+                        Save Color Edits
+                    </button>
+
+                    <button
+                        id="discard-cmd-inspector"
+                        type="button"
+                        class="secondary-button"
+                        disabled
+                    >
+                        Discard Unsaved
+                    </button>
+
+                    <span
+                        id="cmd-inspector-dirty-indicator"
+                        class="cmd-inspector-dirty-indicator hidden"
+                    >
+                        Unsaved changes
+                    </span>
+                </div>
+            </div>
+
+            <details
+                id="parsed-data-details"
+                class="collapsible-section"
+                open
+            >
+                <summary class="collapsible-section-summary">
+                    <span>Material color slots</span>
+                    <span class="collapsible-section-hint">click to collapse</span>
+                </summary>
+
+                <div class="collapsible-section-body">
+                    <div
+                        id="inspector-toolbar"
+                        class="inspector-toolbar hidden"
+                    >
+                        <button
+                            id="expand-all-clusters"
+                            type="button"
+                            class="secondary-button"
+                        >
+                            Expand All
+                        </button>
+
+                        <button
+                            id="collapse-all-clusters"
+                            type="button"
+                            class="secondary-button"
+                        >
+                            Collapse All
+                        </button>
+                    </div>
+
+                    <div id="cluster-inspector"></div>
+                </div>
+            </details>
+        </section>
+
+
+        <!-- ==================================================
+             COLOR / PATTERN SYNC
+             ================================================== -->
+
+        <section
+            class="panel hidden"
+            id="color-panel"
+        >
+            <div class="section-title">
+                <span class="section-number">3</span>
+                <div>
+                    <h2>Sync Colors</h2>
+                    <p class="section-description">
+                        Color Sync edits one CMD. Pattern Sync applies the same material/slot mapping across many CMDs, using each palette’s own source color.
+                    </p>
+                </div>
+            </div>
+
+            <div class="sync-mode-tabs" role="tablist">
+                <button type="button" class="sync-mode-tab active" data-sync-mode="color">Color Sync</button>
+                <button type="button" class="sync-mode-tab" data-sync-mode="pattern">Pattern Sync</button>
+            </div>
+
+            <!-- Color Sync: active CMD only -->
+            <div id="color-sync-pane">
+                <p class="sync-active-line">
+                    Active CMD:
+                    <strong id="color-sync-active-label">—</strong>
+                    <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
+                </p>
+
+                <div class="common-palette" data-common-palette>
+                    <div class="common-palette-label">Common colors</div>
+                    <div class="common-palette-swatches" data-common-palette-swatches></div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="sync-column">
+                        <label>Source material</label>
+                        <div class="custom-select material-select" id="color-source-material">
+                            <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
+                                <span class="cs-text">Select a material</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <label>Source slot</label>
+                        <div class="custom-select" id="color-source-slot">
+                            <button type="button" class="custom-select-trigger">
+                                <span class="cs-swatch"></span>
+                                <span class="cs-text">Select a slot</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <div class="source-color-editor">
+                            <input type="button" id="color-source-color-picker" class="source-color-picker" aria-label="Source color">
+                            <div class="hex-input-control">
+                                <input
+                                    type="text"
+                                    id="color-source-color-hex"
+                                    class="source-color-hex"
+                                    maxlength="9"
+                                    spellcheck="false"
+                                    placeholder="#RRGGBBAA"
+                                >
+                                <button type="button" class="hex-paste-button" aria-label="Paste hex color" title="Paste">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sync-column">
+                        <label>Target material</label>
+                        <div class="custom-select material-select" id="color-target-material">
+                            <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
+                                <span class="cs-text">Select a material</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <div class="sync-target-section">
+                            <div class="sync-target-header">
+                                <span class="sync-target-label">Target slots</span>
+                                <div class="sync-target-toggles">
+                                    <button type="button" id="color-target-select-all" class="small-button">All</button>
+                                    <button type="button" id="color-target-select-none" class="small-button">None</button>
+                                </div>
+                            </div>
+                            <div id="color-target-slots" class="sync-target-grid"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="apply-color-sync" type="button">Apply Color Sync</button>
+            </div>
+
+            <!-- Pattern Sync: multi CMD -->
+            <div id="pattern-sync-pane" class="hidden">
+                <p id="pattern-source-note" class="sync-active-line muted-inline"></p>
+
+                <div class="form-grid">
+                    <div class="sync-column">
+                        <label>Source material</label>
+                        <div class="custom-select material-select" id="pattern-source-material">
+                            <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
+                                <span class="cs-text">Select a material</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <label>Source slot</label>
+                        <div class="custom-select" id="pattern-source-slot">
+                            <button type="button" class="custom-select-trigger">
+                                <span class="cs-swatch"></span>
+                                <span class="cs-text">Select a slot</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <div class="source-color-editor">
+                            <input type="button" id="pattern-source-color-picker" class="source-color-picker" disabled aria-label="Source color preview">
+                            <input
+                                type="text"
+                                id="pattern-source-color-hex"
+                                class="source-color-hex"
+                                maxlength="9"
+                                spellcheck="false"
+                                placeholder="#RRGGBBAA"
+                                readonly
+                            >
+                        </div>
+
+                        <div class="sync-target-section">
+                            <div class="sync-target-header">
+                                <span class="sync-target-label">Target CMDs</span>
+                                <div class="sync-target-toggles">
+                                    <button type="button" id="pattern-cmd-select-all" class="small-button">All</button>
+                                    <button type="button" id="pattern-cmd-select-none" class="small-button">None</button>
+                                </div>
+                            </div>
+                            <div id="pattern-target-cmds" class="sync-target-grid target-cmd-grid"></div>
+                        </div>
+                    </div>
+
+                    <div class="sync-column">
+                        <label>Target material</label>
+                        <div class="custom-select material-select" id="pattern-target-material">
+                            <button type="button" class="custom-select-trigger" aria-haspopup="listbox">
+                                <span class="cs-text">Select a material</span>
+                                <span class="cs-arrow">▼</span>
+                            </button>
+                            <div class="custom-select-dropdown hidden"></div>
+                        </div>
+
+                        <div class="sync-target-section">
+                            <div class="sync-target-header">
+                                <span class="sync-target-label">Target slots</span>
+                                <div class="sync-target-toggles">
+                                    <button type="button" id="pattern-target-select-all" class="small-button">All</button>
+                                    <button type="button" id="pattern-target-select-none" class="small-button">None</button>
+                                </div>
+                            </div>
+                            <div id="pattern-target-slots" class="sync-target-grid"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="apply-pattern-sync" type="button">Apply Pattern Sync</button>
+            </div>
+
+            <div
+                id="apply-status"
+                class="status-box hidden"
+            >
+            </div>
+        </section>
+
+
+        <!-- ==================================================
+             COLOR REPLACE
+             ================================================== -->
+
+        <section
+            class="panel hidden"
+            id="color-replace-panel"
+        >
+            <div class="section-title"><div><h2>Replace Color Everywhere</h2><p class="section-description">
+                Search the <strong>active CMD</strong> for an exact RGBA color and replace all matching CustomizeColor slots.
+                <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change active CMD in section 2</a>
+            </p></div></div>
+
+            <p class="sync-active-line replace-active-line">
+                Active CMD:
+                <strong id="replace-active-label">—</strong>
+                <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
+            </p>
+
+            <div class="common-palette" data-common-palette>
+                <div class="common-palette-label">Common colors</div>
+                <div class="common-palette-swatches" data-common-palette-swatches></div>
+            </div>
+
+            <div class="form-grid">
+                <div class="sync-column">
+                    <div class="replace-color-field">
+                        <span class="replace-color-label">Find Color</span>
+                        <div class="source-color-editor replace-color-editor">
+                            <input
+                                type="button"
+                                id="replace-find-picker"
+                                class="source-color-picker"
+                                aria-label="Find color"
+                            >
+                            <div class="hex-input-control">
+                                <input
+                                    id="replace-find-color"
+                                    type="text"
+                                    class="source-color-hex"
+                                    value="#FFFFFFFF"
+                                    maxlength="9"
+                                    spellcheck="false"
+                                    placeholder="#RRGGBBAA"
+                                >
+                                <button type="button" class="hex-paste-button" aria-label="Paste hex color" title="Paste">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="replace-find-meta" class="replace-color-meta">
+                            <span class="swatch-inline" id="replace-find-swatch"></span>
+                            <span id="replace-find-name">white</span>
+                        </div>
+                    </div>
+
+                    <div class="replace-color-field">
+                        <span class="replace-color-label">Replace With</span>
+                        <div class="source-color-editor replace-color-editor">
+                            <input
+                                type="button"
+                                id="replace-new-picker"
+                                class="source-color-picker"
+                                aria-label="Replace with color"
+                            >
+                            <div class="hex-input-control">
+                                <input
+                                    id="replace-new-color"
+                                    type="text"
+                                    class="source-color-hex"
+                                    value="#000000FF"
+                                    maxlength="9"
+                                    spellcheck="false"
+                                    placeholder="#RRGGBBAA"
+                                >
+                                <button type="button" class="hex-paste-button" aria-label="Paste hex color" title="Paste">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="replace-new-meta" class="replace-color-meta">
+                            <span class="swatch-inline" id="replace-new-swatch"></span>
+                            <span id="replace-new-name">black</span>
+                        </div>
+                    </div>
+
+                    <button
+                        id="replace-color-button"
+                        type="button"
+                    >
+                        Replace Everywhere
+                    </button>
+
+                    <div
+                        id="replace-color-status"
+                        class="status-box hidden"
+                    ></div>
+                </div>
+
+                <div class="sync-column">
+                    <div
+                        id="replace-color-results"
+                        class="replace-results"
+                    ></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================================================
+             OUTPUT
+             ================================================== -->
+
+        <section
+            id="current-changes-panel"
+            class="panel hidden"
+        >
+            <div class="panel-heading">
+                <div class="section-title">
+                    <span class="section-icon">◆</span>
+                    <div>
+                        <h2>Current Changes</h2>
+                        <p class="section-description">Review, edit, or revert every color change currently staged for export.</p>
+                    </div>
+                </div>
+
+                <button
+                    id="revert-all-changes"
+                    type="button"
+                    class="secondary-button"
+                    disabled
+                >
+                    Revert All
+                </button>
+            </div>
+
+            <div id="current-changes-empty" class="status-box">
+                No changes yet.
+            </div>
+
+            <div id="current-changes-list" class="current-changes-list">
+            </div>
+        </section>
+
+        <section
+            class="panel hidden"
+            id="output-panel"
+        >
+
+            <div class="section-title">
+                <span class="section-number">4</span>
+                <div>
+                    <h2>Build Mod</h2>
+                    <p class="section-description">Export the currently staged CMD changes as modified CMD files or a ready-to-use mod ZIP.</p>
+                </div>
+            </div>
+
+            <div class="form-grid">
+
+                <label>
+                    <span>
+                        Mod name
+                    </span>
+
+                    <input
+                        id="mod-name"
+                        type="text"
+                        autocomplete="off"
+                    >
+                </label>
+
+
+                <label>
+                    <span>
+                        Description
+                    </span>
+
+                    <input
+                        id="mod-description"
+                        type="text"
+                        value="Made with SF6 CMD Color Sync"
+                        autocomplete="off"
+                    >
+                </label>
+
+
+                <label>
+                    <span>
+                        Author
+                    </span>
+
+                    <input
+                        id="mod-author"
+                        type="text"
+                        value="ZZtai"
+                        autocomplete="off"
+                    >
+                </label>
+
+            </div>
+
+
+            <div class="export-actions">
+                <button
+                    id="build-button"
+                    type="button"
+                    disabled
+                >
+                    Build Game-Ready Mod
+                </button>
+
+                <button
+                    id="export-cmd-button"
+                    type="button"
+                    class="secondary-button"
+                    disabled
+                >
+                    Export Modified CMD Files
+                </button>
+            </div>
+
+            <details id="additional-file-options" class="collapsible-section export-destinations">
+                <summary class="collapsible-section-summary">
+                    <span>Additional file options</span>
+                    <span class="collapsible-section-hint">click to expand</span>
+                </summary>
+                <div class="collapsible-section-body" aria-label="Saved export folders">
+                    <div class="export-destination-row">
+                        <div><strong>CMD files</strong><span id="cmd-export-folder-name">Browser downloads</span></div>
+                        <button id="choose-cmd-export-folder" type="button" class="secondary-button">Choose Folder</button>
+                        <button id="clear-cmd-export-folder" type="button" class="secondary-button" disabled>Forget Folder</button>
+                    </div>
+                    <div class="export-destination-row">
+                        <div><strong>Mod ZIP</strong><span id="zip-export-folder-name">Browser downloads</span></div>
+                        <button id="choose-zip-export-folder" type="button" class="secondary-button">Choose Folder</button>
+                        <button id="clear-zip-export-folder" type="button" class="secondary-button" disabled>Forget Folder</button>
+                    </div>
+                    <label class="export-duplicate-option">
+                        <input id="replace-duplicate-exports" type="checkbox">
+                        <span>Replace matching file names</span>
+                    </label>
+                    <p class="export-duplicate-hint">By default, duplicate exports are renamed. When enabled, you will be asked before an existing CMD or ZIP is replaced.</p>
+                    <p class="export-destination-hint">Choose a folder to save there automatically. Without one, exports use your browser downloads.</p>
+                </div>
+            </details>
+
+            <div
+                id="export-cmd-status"
+                class="status-box hidden"
+            >
+            </div>
+
+
+            <div
+                id="build-status"
+                class="status-box hidden"
+            >
+            </div>
+
+            <div
+                id="screenshot-drop-zone"
+                class="screenshot-drop-zone"
+            >
+                <input
+                    id="screenshot-file"
+                    type="file"
+                    accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                    class="hidden"
+                >
+
+                <div
+                    id="screenshot-preview-wrap"
+                    class="screenshot-preview-wrap hidden"
+                >
+                    <img
+                        id="screenshot-preview"
+                        class="screenshot-preview"
+                        alt="Selected screenshot preview"
+                    >
+                </div>
+
+                <div class="screenshot-drop-content">
+                    <div class="screenshot-drop-title">
+                        Screenshot
+                    </div>
+
+                    <div
+                        id="screenshot-status"
+                        class="screenshot-drop-status"
+                    >
+                        Drop a PNG or JPG here, or click to browse.
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="about-tool" class="about-grid">
+            <section class="info-card info-card-wide">
+                <div class="info-eyebrow">Help</div>
+                <h2>How to use</h2>
+                <div class="instruction-list">
+                    <div class="instruction-step"><span>1</span><div><strong>Load CMD files</strong><p>Select one or more colors from the same character and outfit.</p></div></div>
+                    <div class="instruction-step"><span>2</span><div><strong>Edit or sync</strong><p>Edit a single CMD directly or synchronize colors across multiple colors.</p></div></div>
+                    <div class="instruction-step"><span>3</span><div><strong>Review Current Changes</strong><p>Adjust or revert anything before export.</p></div></div>
+                    <div class="instruction-step"><span>4</span><div><strong>Build your mod</strong><p>Export modified CMD files or create the ready-to-use mod ZIP.</p></div></div>
+                </div>
+                <a class="feature-guide-callout" href="./features.html">
+                    <span class="feature-guide-callout-icon" aria-hidden="true">↗</span>
+                    <span><strong>Explore the Feature Guide</strong><small>See each editing and sync tool explained visually.</small></span>
+                </a>
+            </section>
+
+            <section class="info-card"><div class="info-eyebrow">Support</div><h2>Support Development</h2><p>Show support by starring this project and others in Credits. If you want to tip, I have a Patreon.</p><p class="support-community-copy">Also, shoutout to various RE tool makers and modding contributors in Haven’s Night Discord. You can ping me there <strong>@zain37</strong>.</p><div class="support-buttons"><a class="support-button github-star-button" href="https://github.com/ZZtaii/colorsync-sf6" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.3a9.7 9.7 0 0 0-3.07 18.9c.49.09.66-.21.66-.47v-1.7c-2.7.59-3.27-1.15-3.27-1.15-.44-1.13-1.08-1.43-1.08-1.43-.88-.61.07-.6.07-.6.98.07 1.49 1 1.49 1 .87 1.49 2.28 1.06 2.83.81.09-.63.34-1.06.62-1.3-2.15-.24-4.42-1.08-4.42-4.79 0-1.06.38-1.92 1-2.6-.1-.24-.43-1.24.1-2.58 0 0 .82-.26 2.67 1a9.2 9.2 0 0 1 4.86 0c1.85-1.26 2.67-1 2.67-1 .53 1.34.2 2.34.1 2.58.62.68 1 1.54 1 2.6 0 3.72-2.28 4.54-4.44 4.78.35.3.66.88.66 1.77v2.63c0 .26.18.56.67.47A9.7 9.7 0 0 0 12 2.3Z" fill="currentColor"/></svg> Star Project</a><a class="support-button discord-button" href="https://discord.gg/rZUSECRft" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.1A16.1 16.1 0 0 0 15.6 4l-.48.97a14.8 14.8 0 0 0-4.24 0L10.4 4a16.1 16.1 0 0 0-3.9 1.1C4.03 8.8 3.36 12.4 3.7 15.95A15.7 15.7 0 0 0 8.48 18.4l1.16-1.58a8.8 8.8 0 0 1-1.82-.87l.48-.37c3.5 1.62 7.3 1.62 10.76 0l.48.37a8.8 8.8 0 0 1-1.82.87l1.16 1.58a15.7 15.7 0 0 0 4.78-2.45c.4-4.12-.68-7.68-3.16-10.85ZM9.14 13.77c-.94 0-1.7-.86-1.7-1.91s.75-1.91 1.7-1.91c.96 0 1.72.86 1.7 1.91 0 1.05-.75 1.91-1.7 1.91Zm5.72 0c-.94 0-1.7-.86-1.7-1.91s.75-1.91 1.7-1.91c.96 0 1.72.86 1.7 1.91 0 1.05-.74 1.91-1.7 1.91Z" fill="currentColor"/></svg> Haven’s Night</a><a class="support-button patreon-button" href="https://www.patreon.com/cw/ZZtai" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3h5v18H0V3Zm14.5 0a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z" fill="currentColor"/></svg> Patreon</a></div></section>
+
+            <section class="info-card"><div class="info-eyebrow">Project</div><h2>Credits</h2><dl class="credits-list"><div><dt>Tool</dt><dd>ZZtai</dd></div><div><dt>RSZ understanding</dt><dd><a href="https://github.com/seifhassine/REasy" target="_blank" rel="noopener noreferrer">REasy project and contributors</a></dd></div><div><dt>ZIP library</dt><dd><a href="https://github.com/101arrowz/fflate" target="_blank" rel="noopener noreferrer">fflate</a></dd></div></dl></section>
+
+        </section>
+
+
+        <!-- ==================================================
+             DEVELOPMENT / DEBUG
+             ================================================== -->
+
+    </main>
+
+
+    <footer class="site-footer"><div class="page-width footer-content"><div><strong>SF6 CMD Color Sync</strong><p>Street Fighter 6 color editing and synchronization.</p></div><div class="footer-links"><a href="#about-tool">Instructions</a><a href="./features.html">Feature guide</a><a href="#about-tool">Credits</a></div><div class="footer-meta"><p>Files never leave your browser.</p><p>Not affiliated with or endorsed by Capcom.</p></div></div></footer>
+
+
+
+
+    <div id="reference-viewer" class="reference-viewer hidden" aria-label="Reference image viewer">
+        <div id="reference-viewer-shell" class="reference-viewer-shell">
+            <div id="reference-viewer-image-wrap" class="reference-viewer-image-wrap">
+                <img id="reference-viewer-image" class="reference-viewer-image" alt="">
+                <span id="reference-viewer-count" class="reference-viewer-count" aria-label="Reference image position"></span>
+
+                <div class="reference-viewer-controls">
+                    <button id="reference-viewer-minimize" type="button" class="reference-viewer-control" aria-label="Minimize reference viewer" title="Minimize">-</button>
+                    <button id="reference-viewer-add" type="button" class="reference-viewer-control" aria-label="Add custom reference image" title="Add image">+</button>
+                </div>
+
+                <button id="reference-viewer-prev" type="button" class="reference-viewer-arrow reference-viewer-prev" aria-label="Previous reference image" title="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                <button id="reference-viewer-next" type="button" class="reference-viewer-arrow reference-viewer-next" aria-label="Next reference image" title="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+
+                <div class="reference-viewer-caption">
+                    <span id="reference-viewer-label" class="reference-viewer-label"></span>
+                    <span id="reference-viewer-credit" class="reference-viewer-credit">Image © CAPCOM</span>
+                </div>
+            </div>
+
+            <div
+                id="reference-viewer-resize"
+                class="reference-viewer-resize"
+                title="Drag to resize"
+                aria-hidden="true"
+            ></div>
+        </div>
+        <input id="reference-image-input" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" multiple hidden>
+    </div>
+
+    <button id="reference-viewer-restore" type="button" class="reference-viewer-restore hidden" title="Show reference viewer">
+        Reference
+    </button>
+
+    <div
+        id="custom-color-picker"
+        class="custom-color-picker hidden"
+    >
+        <div
+            id="color-picker-sv"
+            class="color-picker-sv"
+        >
+            <div
+                id="color-picker-sv-cursor"
+                class="color-picker-sv-cursor"
+            ></div>
+        </div>
+
+        <input
+            id="color-picker-hue"
+            class="color-picker-hue"
+            type="range"
+            min="0"
+            max="360"
+            step="1"
+            value="0"
+        >
+
+        <div class="color-picker-preview-row">
+            <div
+                id="color-picker-preview"
+                class="color-picker-preview"
+            ></div>
+
+            <input
+                id="color-picker-hex"
+                class="color-picker-hex"
+                type="text"
+                maxlength="9"
+                spellcheck="false"
+            >
+        </div>
+
+        <div class="color-picker-rgba">
+            <label>
+                <span>R</span>
+                <input id="color-picker-r" type="number" min="0" max="255">
+            </label>
+            <label>
+                <span>G</span>
+                <input id="color-picker-g" type="number" min="0" max="255">
+            </label>
+            <label>
+                <span>B</span>
+                <input id="color-picker-b" type="number" min="0" max="255">
+            </label>
+            <label>
+                <span>A</span>
+                <input id="color-picker-a" type="number" min="0" max="255">
+            </label>
+        </div>
+    </div>
+
+    <script
+        type="module"
+        src="./app.js"
+    ></script>
+</body>
+</html>
+
+

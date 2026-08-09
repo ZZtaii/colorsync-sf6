@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://colorsync-sf6.pages.dev/sitemap.xml
