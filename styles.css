@@ -4646,3 +4646,17 @@ body.is-resizing-reference {
 #reference-viewer:focus-within .reference-viewer-count {
     opacity: 1 !important;
 }
+
+/* Keep editing tools in their intended workflow order. */
+main.page-width {
+    display: flex;
+    flex-direction: column;
+}
+
+#file-panel { order: 1; }
+#parser-panel { order: 2; }
+#color-replace-panel { order: 3; }
+#color-panel { order: 4; }
+#current-changes-panel { order: 5; }
+#output-panel { order: 6; }
+#about-tool { order: 7; }
