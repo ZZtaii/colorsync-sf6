@@ -25,6 +25,14 @@
 // ============================================================
 
 import { unzip, zipSync } from "./lib/fflate.js";
+import {
+    colorBackupDateLabel,
+    emptyColorBackupManifest,
+    isColorBackupPath,
+    readColorBackupManifest,
+    safeArchiveRelativePath,
+    writeColorBackupSnapshots,
+} from "./lib/color-backups.js";
 import { inspectUsr } from "./lib/usr-parser.js";
 import { inspectRsz } from "./lib/rsz-parser.js";
 import {
@@ -118,6 +126,7 @@ const state = {
     // Material expansion is a workspace view preference, shared as the user
     // moves between loaded CMD palettes.
     openClusterNames: new Set(),
+    surpriseSnapshots: new Map(),
 
     inspectorDirty: false,
 
@@ -181,6 +190,7 @@ const zipImportProgress = document.querySelector("#zip-import-progress");
 const zipImportProgressLabel = document.querySelector("#zip-import-progress-label");
 const zipImportProgressBar = document.querySelector("#zip-import-progress-bar");
 const colorLibraryPanel = document.querySelector("#color-library-panel");
+const colorLibraryHeading = document.querySelector("#color-library-heading");
 const colorLibraryDetection = document.querySelector("#color-library-detection");
 const colorLibraryTargetField = document.querySelector("#color-library-target-field");
 const colorLibraryTargetSelect = document.querySelector("#color-library-target");
@@ -196,6 +206,10 @@ const dxReferenceWarning = document.querySelector("#dx-reference-warning");
 const fileSummary = document.querySelector("#file-summary");
 const fileList = document.querySelector("#file-list");
 const unloadAllCmdsBtn = document.querySelector("#unload-all-cmds");
+const colorBackupPanel = document.querySelector("#color-backup-panel");
+const colorBackupCount = document.querySelector("#color-backup-count");
+const colorBackupList = document.querySelector("#color-backup-list");
+const colorBackupStatus = document.querySelector("#color-backup-status");
 const additionalFileOptions = document.querySelector("#additional-file-options");
 const detectedCharacter = document.querySelector("#detected-character");
 const colorPanel = document.querySelector("#color-panel");
@@ -272,7 +286,8 @@ const referenceViewerAdd = document.querySelector("#reference-viewer-add");
 const referenceViewerResize = document.querySelector("#reference-viewer-resize");
 const referenceImageInput = document.querySelector("#reference-image-input");
 const parsedDataDetails = document.querySelector("#parsed-data-details");
-const replaceActiveLabel = document.querySelector("#replace-active-label");
+const sectionRail = document.querySelector(".section-rail");
+const sectionRailLinks = [...document.querySelectorAll("[data-section-target]")];
 
 const UI_STATE_KEY = "sf6-color-sync-ui-v1";
 
@@ -500,6 +515,97 @@ function screenshotZipEntryName(file) {
     const cleaned = original.replace(/[<>:"/\\|?*\x00-\x1f]+/g, "_");
     if (/^screenshot-/i.test(cleaned)) return cleaned;
     return `screenshot-${cleaned}`;
+}
+
+function sectionRailTarget(link) {
+    return document.querySelector(link?.dataset?.sectionTarget || "");
+}
+
+function updateSectionRailAvailability() {
+    sectionRailLinks.forEach(link => {
+        const target = sectionRailTarget(link);
+        const unavailable = !target || target.classList.contains("hidden");
+        link.classList.toggle("is-disabled", unavailable);
+        link.setAttribute("aria-disabled", String(unavailable));
+        if (unavailable) link.setAttribute("tabindex", "-1");
+        else link.removeAttribute("tabindex");
+    });
+}
+
+function updateActiveSectionRailLink() {
+    const available = sectionRailLinks
+        .map(link => ({ link, target: sectionRailTarget(link) }))
+        .filter(item => item.target && !item.target.classList.contains("hidden"))
+        .sort((a, b) => a.target.offsetTop - b.target.offsetTop);
+    if (!available.length) return;
+
+    const marker = window.innerHeight * 0.32;
+    let active = available[0];
+    for (const item of available) {
+        if (item.target.getBoundingClientRect().top <= marker) active = item;
+        else break;
+    }
+    sectionRailLinks.forEach(link => {
+        const selected = link === active.link;
+        link.classList.toggle("is-active", selected);
+        if (selected) link.setAttribute("aria-current", "location");
+        else link.removeAttribute("aria-current");
+    });
+}
+
+function jumpToAvailableSection(link) {
+    const target = sectionRailTarget(link);
+    if (!target || target.classList.contains("hidden")) return false;
+    target.scrollIntoView({ behavior: "auto", block: "start" });
+    updateActiveSectionRailLink();
+    target.classList.remove("section-flash");
+    requestAnimationFrame(() => target.classList.add("section-flash"));
+    setTimeout(() => target.classList.remove("section-flash"), 1200);
+    return true;
+}
+
+function isSectionShortcutBlocked(event) {
+    if (event.defaultPrevented || event.repeat || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return true;
+    if (!/^[1-5]$/.test(event.key)) return true;
+    if (!customColorPicker?.classList.contains("hidden")) return true;
+    return Boolean(event.target?.closest?.(
+        "input, textarea, select, button, [contenteditable='true'], [role='textbox'], [role='listbox']",
+    ));
+}
+
+function bindSectionRail() {
+    if (!sectionRail) return;
+    sectionRailLinks.forEach(link => {
+        link.addEventListener("click", event => {
+            event.preventDefault();
+            jumpToAvailableSection(link);
+        });
+    });
+    document.addEventListener("keydown", event => {
+        if (isSectionShortcutBlocked(event)) return;
+        const link = sectionRailLinks.find(item => item.getAttribute("aria-keyshortcuts") === event.key);
+        if (!link || !jumpToAvailableSection(link)) return;
+        event.preventDefault();
+    });
+
+    let scrollFrame = 0;
+    const scheduleActiveUpdate = () => {
+        if (scrollFrame) return;
+        scrollFrame = requestAnimationFrame(() => {
+            scrollFrame = 0;
+            updateSectionRailAvailability();
+            updateActiveSectionRailLink();
+        });
+    };
+    window.addEventListener("scroll", scheduleActiveUpdate, { passive: true });
+    window.addEventListener("resize", scheduleActiveUpdate);
+    new MutationObserver(scheduleActiveUpdate).observe(document.querySelector("main"), {
+        attributes: true,
+        attributeFilter: ["class"],
+        subtree: true,
+    });
+    updateSectionRailAvailability();
+    updateActiveSectionRailLink();
 }
 
 function zipEntryBaseName(path) {
@@ -998,6 +1104,54 @@ function renderColorLibraryTargetDropdown(targets) {
     };
 }
 
+function missingPaletteNumbers(target = state.importedMod?.paletteTarget) {
+    if (!target) return [];
+    const present = new Set(state.cmdEntries
+        .filter(cmd => (
+            cmd.metadata.variant === "standard"
+            && cmd.metadata.esfId === target.esfId
+            && cmd.metadata.costumeFolder === target.costumeFolder
+            && cmd.metadata.paletteNumber >= 1
+            && cmd.metadata.paletteNumber <= 10
+        ))
+        .map(cmd => cmd.metadata.paletteNumber));
+    return Array.from({ length: 10 }, (_, index) => index + 1)
+        .filter(paletteNumber => !present.has(paletteNumber));
+}
+
+function paletteNumberList(numbers) {
+    const ranges = [];
+    for (const number of numbers) {
+        const previous = ranges.at(-1);
+        if (previous && number === previous.end + 1) previous.end = number;
+        else ranges.push({ start: number, end: number });
+    }
+    const labels = ranges.map(range => (
+        range.start === range.end ? String(range.start) : `${range.start}–${range.end}`
+    ));
+    const joined = labels.length > 1
+        ? `${labels.slice(0, -1).join(", ")} and ${labels.at(-1)}`
+        : labels[0] || "";
+    return `Colors ${joined}`;
+}
+
+async function prepareColorLibraryPicker() {
+    if ("showOpenFilePicker" in window) {
+        state.rememberedColorLibraryHandle = await getRememberedColorLibraryHandle().catch(() => null);
+        colorLibraryOptions?.classList.remove("hidden");
+        forgetColorLibraryButton?.classList.toggle("hidden", !state.rememberedColorLibraryHandle);
+        if (rememberColorLibraryInput) rememberColorLibraryInput.checked = Boolean(state.rememberedColorLibraryHandle);
+    } else {
+        colorLibraryOptions?.classList.add("hidden");
+        forgetColorLibraryButton?.classList.add("hidden");
+    }
+}
+
+function parseStandardCmdFilename(filename) {
+    const metadata = parseCmdFilename(filename);
+    return metadata?.variant === "standard" ? metadata : null;
+}
+
 function resetLoadedCmdState() {
     state.files = [];
     state.rejectedFiles = [];
@@ -1005,6 +1159,7 @@ function resetLoadedCmdState() {
     state.activeCmdIndex = 0;
     state.colorClusters = [];
     state.openClusterNames.clear();
+    state.surpriseSnapshots.clear();
     state.inspectorDirty = false;
     state.detectedEsfId = null;
     state.detectedCharacterName = null;
@@ -1038,8 +1193,17 @@ async function handleModZip(file) {
         }
 
         const paths = Object.keys(entries).filter(path => !path.endsWith("/"));
-        const cmdEntries = paths
-            .filter(path => parseCmdFilename(zipEntryBaseName(path)))
+        // Backups contain valid CMD filenames too, but they are restore sources,
+        // never live mod files to load into the editor automatically.
+        const livePaths = paths.filter(path => !isColorBackupPath(path));
+        const standardCmdPaths = livePaths.filter(path =>
+            parseStandardCmdFilename(zipEntryBaseName(path)),
+        );
+        const ignoredVariantCount = livePaths.filter(path => {
+            const metadata = parseCmdFilename(zipEntryBaseName(path));
+            return metadata && metadata.variant !== "standard";
+        }).length;
+        const cmdEntries = standardCmdPaths
             .map(path => new File([entries[path]], zipEntryBaseName(path), { type: "application/octet-stream" }));
 
         // Some mod managers ZIP the mod contents directly, while others include
@@ -1054,7 +1218,7 @@ async function handleModZip(file) {
 
         if (!cmdEntries.length) {
             const modinfoPaths = paths.filter(path => zipEntryBaseName(path).toLowerCase() === "modinfo.ini");
-            const targets = detectCmdPaletteTarget(paths, modinfoPaths);
+            const targets = detectCmdPaletteTarget(livePaths, modinfoPaths);
             if (!targets.length) {
                 throw new Error("This ZIP has no CMD files and does not expose a detectable SF6 character/outfit path.");
             }
@@ -1065,8 +1229,11 @@ async function handleModZip(file) {
                 entries, modinfoPath, modinfoText, sourceName: file.name, referenceImagePath: screenshotPath,
                 cmdPaths: {}, hadLiveCmd: {}, lastZipExportBuffers: {}, modinfoByRoot,
                 paletteTarget: targets[0], paletteTargets: targets,
+                colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
             };
+            renderColorBackupPanel();
             selectFallbackPaletteTarget(targets[0]);
+            if (colorLibraryHeading) colorLibraryHeading.textContent = "This mod has no CMD palette files.";
             if (colorLibraryDetection) colorLibraryDetection.textContent = targets.length === 1
                 ? ` Detected ${SF6_CHARACTERS[targets[0].esfId] || targets[0].esfId}, Outfit ${Number(targets[0].costumeFolder)}.`
                 : " Select which detected character and outfit should receive CMD colors.";
@@ -1077,15 +1244,7 @@ async function handleModZip(file) {
             requestAnimationFrame(() => {
                 colorLibraryPanel?.scrollIntoView({ behavior: "smooth", block: "center" });
             });
-            if ("showOpenFilePicker" in window) {
-                state.rememberedColorLibraryHandle = await getRememberedColorLibraryHandle().catch(() => null);
-                colorLibraryOptions?.classList.remove("hidden");
-                forgetColorLibraryButton?.classList.toggle("hidden", !state.rememberedColorLibraryHandle);
-                if (rememberColorLibraryInput) rememberColorLibraryInput.checked = Boolean(state.rememberedColorLibraryHandle);
-            } else {
-                colorLibraryOptions?.classList.add("hidden");
-                forgetColorLibraryButton?.classList.add("hidden");
-            }
+            await prepareColorLibraryPicker();
             return;
         }
 
@@ -1097,13 +1256,13 @@ async function handleModZip(file) {
             modinfoText,
             sourceName: file.name,
             referenceImagePath: screenshotPath,
-            cmdPaths: Object.fromEntries(paths
-                .filter(path => parseCmdFilename(zipEntryBaseName(path)))
-                .map(path => [cmdIdentityKey(parseCmdFilename(zipEntryBaseName(path))), path])),
-            hadLiveCmd: Object.fromEntries(paths
-                .filter(path => parseCmdFilename(zipEntryBaseName(path)))
-                .map(path => [path, true])),
+            cmdPaths: Object.fromEntries(standardCmdPaths.map(path => [
+                cmdIdentityKey(parseStandardCmdFilename(zipEntryBaseName(path))),
+                path,
+            ])),
+            hadLiveCmd: Object.fromEntries(standardCmdPaths.map(path => [path, true])),
             lastZipExportBuffers: {},
+            colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
         };
         setImportedModMetadata(modinfoText, file.name);
         if (screenshotPath) {
@@ -1114,14 +1273,46 @@ async function handleModZip(file) {
         }
         setZipImportProgress("Loading CMD files…", 100, { indeterminate: true });
         await handleFiles(cmdEntries);
-        colorLibraryPanel?.classList.add("hidden");
         state.cmdEntries.forEach(cmd => {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
         });
+        const loadedMeta = state.cmdEntries[0]?.metadata;
+        const detectedTarget = detectCmdPaletteTarget(
+            livePaths,
+            paths.filter(path => zipEntryBaseName(path).toLowerCase() === "modinfo.ini"),
+        ).find(target => (
+            target.esfId === loadedMeta?.esfId
+            && target.costumeFolder === loadedMeta?.costumeFolder
+        ));
+        const paletteTarget = detectedTarget || {
+            esfId: loadedMeta.esfId,
+            costumeFolder: loadedMeta.costumeFolder,
+            modRoots: [modRoot],
+        };
+        state.importedMod.paletteTarget = paletteTarget;
+        const missing = missingPaletteNumbers(paletteTarget);
+        if (missing.length) {
+            if (colorLibraryHeading) {
+                colorLibraryHeading.textContent = `This mod includes ${10 - missing.length} of 10 CMD palette files.`;
+            }
+            if (colorLibraryDetection) {
+                colorLibraryDetection.textContent = ` Add ${paletteNumberList(missing)} from SF6 Colors.zip. Existing mod colors will be kept.`;
+            }
+            colorLibraryTargetField?.classList.add("hidden");
+            colorLibraryPanel?.classList.remove("hidden", "bad");
+            colorLibraryPanel?.classList.add("warn");
+            await prepareColorLibraryPicker();
+        } else {
+            delete state.importedMod.paletteTarget;
+            colorLibraryPanel?.classList.add("hidden");
+        }
+        renderColorBackupPanel();
         showStatus(
             parserStatus,
             "good",
-            `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from “${file.name}”. Other mod files will be preserved on ZIP export.`,
+            `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from “${file.name}”.`
+            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
+            + " Other mod files will be preserved on ZIP export.",
         );
     } finally {
         hideZipImportProgress();
@@ -1137,12 +1328,27 @@ async function loadCmdsFromColorLibrary(file) {
         const zipData = await readZipWithProgress(file);
         setZipImportProgress("Finding matching CMD colors…", 100, { indeterminate: true });
         const libraryEntries = await unzipArchive(new Uint8Array(zipData));
-        const matching = Object.entries(libraryEntries).filter(([path]) => {
+        const neededPalettes = new Set(missingPaletteNumbers(target));
+        if (!neededPalettes.size) throw new Error("All Colors 1–10 are already loaded from this mod.");
+        let ignoredVariantCount = 0;
+        const matchingByPalette = new Map();
+        Object.entries(libraryEntries).forEach(([path, bytes]) => {
             const meta = parseCmdFilename(zipEntryBaseName(path));
-            return meta?.esfId === target.esfId && meta.costumeFolder === target.costumeFolder;
+            if (meta?.esfId !== target.esfId || meta.costumeFolder !== target.costumeFolder) return;
+            if (meta.variant !== "standard") {
+                ignoredVariantCount += 1;
+                return;
+            }
+            if (!neededPalettes.has(meta.paletteNumber) || matchingByPalette.has(meta.paletteNumber)) return;
+            matchingByPalette.set(meta.paletteNumber, [path, bytes]);
         });
+        const matching = [...matchingByPalette.values()]
+            .sort(([a], [b]) => (
+                parseCmdFilename(zipEntryBaseName(a)).paletteNumber
+                - parseCmdFilename(zipEntryBaseName(b)).paletteNumber
+            ));
         if (!matching.length) {
-            throw new Error(`SF6 Colors.zip has no CMD files for ${SF6_CHARACTERS[target.esfId] || target.esfId}, Outfit ${Number(target.costumeFolder)}.`);
+            throw new Error(`SF6 Colors.zip has none of the missing standard CMD files for ${SF6_CHARACTERS[target.esfId] || target.esfId}, Outfit ${Number(target.costumeFolder)}.`);
         }
         const cmdFiles = matching.map(([path, bytes]) => new File([bytes], zipEntryBaseName(path), { type: "application/octet-stream" }));
         const modRoots = target.modRoots?.length ? target.modRoots : [zipEntryDirectory(state.importedMod.modinfoPath)];
@@ -1160,21 +1366,35 @@ async function loadCmdsFromColorLibrary(file) {
             return match?.[1]
                 || `${root}natives/STM/Product/Model/esf/${target.esfId}/${target.costumeFolder}/`;
         };
-        state.importedMod.cmdPaths = Object.fromEntries(matching.map(([path]) => {
+        const libraryCmdPaths = Object.fromEntries(matching.map(([path]) => {
             const meta = parseCmdFilename(zipEntryBaseName(path));
             return [cmdIdentityKey(meta), modRoots.map(root =>
                 `${cmdDirectoryForRoot(root)}${zipEntryBaseName(path)}`,
             )];
         }));
-        state.importedMod.hadLiveCmd = {};
-        state.importedMod.lastZipExportBuffers = {};
+        state.importedMod.cmdPaths = {
+            ...state.importedMod.cmdPaths,
+            ...libraryCmdPaths,
+        };
         await handleFiles(cmdFiles);
         state.cmdEntries.forEach(cmd => {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
         });
-        delete state.importedMod.paletteTarget;
-        colorLibraryPanel?.classList.add("hidden");
-        showStatus(parserStatus, "good", `Loaded ${state.cmdEntries.length} CMD color files from SF6 Colors.zip.`);
+        const stillMissing = missingPaletteNumbers(target);
+        if (stillMissing.length) {
+            if (colorLibraryHeading) colorLibraryHeading.textContent = `This mod includes ${10 - stillMissing.length} of 10 CMD palette files.`;
+            if (colorLibraryDetection) colorLibraryDetection.textContent = ` SF6 Colors.zip is still missing ${paletteNumberList(stillMissing)}.`;
+        } else {
+            delete state.importedMod.paletteTarget;
+            colorLibraryPanel?.classList.add("hidden");
+        }
+        renderColorBackupPanel();
+        showStatus(
+            parserStatus,
+            "good",
+            `Kept ${state.cmdEntries.length - matching.length} CMD file${state.cmdEntries.length - matching.length === 1 ? "" : "s"} from the mod and added ${matching.length} missing color${matching.length === 1 ? "" : "s"} from SF6 Colors.zip.`
+            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : ""),
+        );
     } finally {
         hideZipImportProgress();
     }
@@ -2044,6 +2264,15 @@ function revertAllChanges() {
                 if (!Number.isInteger(offset)) continue;
                 const rgba = rgbaAtOffset(cmd.originalBuffer, offset);
                 updateColorModelAtOffset(cmd, offset, rgba);
+                const enabled = enabledAtOffset(
+                    cmd.originalBuffer,
+                    color.enable?.absoluteOffset,
+                    color.enable?.byteLength,
+                );
+                if (enabled !== null) {
+                    color.enabled = enabled;
+                    if (color.enable) color.enable.value = enabled;
+                }
             }
         }
     }
@@ -2200,16 +2429,6 @@ function buildExportChangelog(changedCmds) {
     return new TextEncoder().encode(`${lines.join("\n")}\n`);
 }
 
-function uniqueBackupFolder(files, root) {
-    const stamp = new Date().toISOString().replace("T", "_").replace(/:/g, "-").replace(/\.\d{3}Z$/, "");
-    const base = `${root}backup_colors/backup_colorsync/${stamp}_colorsync`;
-    const existing = new Set(Object.keys(files).map(path => path.toLowerCase()));
-    let candidate = base;
-    let index = 2;
-    while ([...existing].some(path => path.startsWith(`${candidate.toLowerCase()}/`))) candidate = `${base}-${index++}`;
-    return `${candidate}/`;
-}
-
 function updateExportButtons() {
     const hasChanges = state.cmdEntries.some(cmd => diffBuffers(exportBaseline(cmd), cmd.workingBuffer).length > 0);
     if (buildButton) buildButton.disabled = !hasChanges;
@@ -2297,26 +2516,23 @@ async function buildModZip() {
     const modinfoPath = state.importedMod?.modinfoPath || "modinfo.ini";
     const modRoot = zipEntryDirectory(modinfoPath);
 
-    if (state.importedMod) {
-        const backupRoot = `${modRoot}backup_colors/`;
-        const originalsRoot = `${backupRoot}original colors/`;
-        const hasOriginals = Object.keys(files).some(path => path.toLowerCase().startsWith(originalsRoot.toLowerCase()));
-        if (!hasOriginals) {
-            for (const cmd of state.cmdEntries) {
-                for (const path of importedCmdPaths(cmd)) {
-                    const relativePath = path.startsWith(modRoot) ? path.slice(modRoot.length) : path;
-                    files[`${originalsRoot}${relativePath}`] = new Uint8Array(cmd.originalBuffer);
-                }
-            }
-        }
-
-        const historyRoot = uniqueBackupFolder(files, modRoot);
-        for (const { paths, baseline } of changedCmds) for (const path of paths) {
-            if (!state.importedMod.hadLiveCmd?.[path]) continue;
-            const relativePath = path.startsWith(modRoot) ? path.slice(modRoot.length) : path;
-            files[`${historyRoot}${relativePath}`] = new Uint8Array(baseline);
-        }
-        files[`${historyRoot}changes.txt`] = buildExportChangelog(changedCmds);
+    {
+        const createdAt = new Date().toISOString();
+        const originalSources = state.importedMod
+            ? state.cmdEntries.flatMap(cmd => importedCmdPaths(cmd).map(path => ({ path, buffer: cmd.originalBuffer })))
+            : changedCmds.flatMap(({ cmd, paths }) => paths.map(path => ({ path, buffer: cmd.originalBuffer })));
+        const historySources = changedCmds.flatMap(({ paths, baseline }) => paths
+            .filter(path => state.importedMod?.hadLiveCmd?.[path])
+            .map(path => ({ path, buffer: baseline })));
+        writeColorBackupSnapshots({
+            files,
+            modRoot,
+            manifest: state.importedMod?.colorBackupManifest || emptyColorBackupManifest(),
+            originalSources,
+            historySources,
+            changelogBytes: historySources.length ? buildExportChangelog(changedCmds) : null,
+            createdAt,
+        });
     }
 
     const modinfoScreenshot = screenshotEntry?.startsWith(modRoot)
@@ -2348,10 +2564,12 @@ async function buildModZip() {
     if (destination.mode === "cancelled") throw new Error("ZIP export cancelled.");
     if (state.importedMod) {
         state.importedMod.entries = files;
+        state.importedMod.colorBackupManifest = readColorBackupManifest(files, modRoot);
         for (const { cmd, paths } of changedCmds) {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
             paths.forEach(path => { state.importedMod.hadLiveCmd[path] = true; });
         }
+        renderColorBackupPanel();
     }
     return { exported, destination };
 }
@@ -2790,6 +3008,119 @@ function renderFileSummary() {
     }
 }
 
+function snapshotFilesForLoadedCmds(snapshot) {
+    const byIdentity = new Map(state.cmdEntries.map(cmd => [cmdIdentityKey(cmd.metadata), cmd]));
+    const matched = new Map();
+    for (const file of snapshot.files) {
+        const metadata = parseCmdFilename(zipEntryBaseName(file.livePath));
+        const identity = cmdIdentityKey(metadata);
+        const cmd = metadata ? byIdentity.get(identity) : null;
+        if (cmd && !matched.has(identity)) matched.set(identity, { ...file, cmd });
+    }
+    return [...matched.values()];
+}
+
+function renderColorBackupPanel() {
+    if (!colorBackupPanel || !colorBackupList) return;
+    const snapshots = state.importedMod?.colorBackupManifest?.snapshots || [];
+    const usable = snapshots
+        .map(snapshot => ({ snapshot, targets: snapshotFilesForLoadedCmds(snapshot) }))
+        .filter(item => item.targets.length > 0)
+        .sort((a, b) => {
+            if (a.snapshot.kind !== b.snapshot.kind) return a.snapshot.kind === "history" ? -1 : 1;
+            return String(b.snapshot.createdAt).localeCompare(String(a.snapshot.createdAt));
+        });
+
+    colorBackupPanel.classList.toggle("hidden", usable.length === 0);
+    colorBackupList.innerHTML = "";
+    hideStatus(colorBackupStatus);
+    if (colorBackupCount) colorBackupCount.textContent = `${usable.length} backup${usable.length === 1 ? "" : "s"}`;
+
+    for (const { snapshot, targets } of usable) {
+        const row = document.createElement("div");
+        row.className = "color-backup-item";
+        const copy = document.createElement("div");
+        copy.className = "color-backup-copy";
+        const title = document.createElement("strong");
+        title.textContent = colorBackupDateLabel(snapshot);
+        const description = document.createElement("span");
+        description.textContent = snapshot.kind === "original"
+            ? `First color set preserved by Color Sync · ${targets.length} loaded CMD file${targets.length === 1 ? "" : "s"}`
+            : `Colors immediately before this export · ${targets.length} CMD${targets.length === 1 ? "" : "s"} backed up`;
+        copy.append(title, description);
+
+        const changelogPath = safeArchiveRelativePath(snapshot.changelogPath);
+        const changelogBytes = changelogPath
+            ? state.importedMod.entries[changelogPath]
+            : null;
+        if (changelogBytes) {
+            const details = document.createElement("details");
+            details.className = "color-backup-changes";
+            const summary = document.createElement("summary");
+            summary.textContent = "View changes made after this backup";
+            const pre = document.createElement("pre");
+            pre.textContent = new TextDecoder().decode(changelogBytes);
+            details.append(summary, pre);
+            copy.append(details);
+        }
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary-button color-backup-restore";
+        button.dataset.restoreColorBackup = snapshot.id;
+        button.textContent = "Restore";
+        row.append(copy, button);
+        colorBackupList.appendChild(row);
+    }
+}
+
+async function restoreColorBackup(snapshotId) {
+    const snapshot = state.importedMod?.colorBackupManifest?.snapshots?.find(item => item.id === snapshotId);
+    if (!snapshot) throw new Error("That color backup is no longer available.");
+    const targets = snapshotFilesForLoadedCmds(snapshot);
+    if (!targets.length) throw new Error("This backup has no files matching the loaded colors.");
+
+    const label = colorBackupDateLabel(snapshot);
+    const accepted = window.confirm(
+        `Restore “${label}” across ${targets.length} CMD file${targets.length === 1 ? "" : "s"}?\n\n`
+        + "This replaces current color changes in those files.",
+    );
+    if (!accepted) return false;
+    if (typeRegistry === null) typeRegistry = await loadSf6TypeRegistry();
+
+    const parsedTargets = await Promise.all(targets.map(async target => {
+        const backupPath = safeArchiveRelativePath(target.backupPath);
+        const bytes = state.importedMod.entries[backupPath];
+        if (!bytes) throw new Error(`Backup file is missing: ${target.backupPath}`);
+        const restored = await parseCmdEntry({
+            file: new File([bytes], target.cmd.file.name, { type: "application/octet-stream" }),
+            metadata: target.cmd.metadata,
+        });
+        return { target, restored };
+    }));
+
+    for (const { target, restored } of parsedTargets) {
+        target.cmd.workingBuffer = restored.workingBuffer;
+        target.cmd.usrInspection = restored.usrInspection;
+        target.cmd.rszInspection = restored.rszInspection;
+        target.cmd.instanceParse = restored.instanceParse;
+        target.cmd.colorClusters = restored.colorClusters;
+        target.cmd.summary = restored.summary;
+    }
+
+    state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters || [];
+    state.inspectorDirty = false;
+    resetSyncSelections();
+    await loadReferenceImages();
+    renderColorClusters(state.colorClusters);
+    renderActiveCmdControls();
+    renderSyncPanels();
+    renderCurrentChanges();
+    updateExportButtons();
+    showStatus(colorBackupStatus, "good", `Restored “${label}” for ${targets.length} CMD file${targets.length === 1 ? "" : "s"}. Review Current Changes, then build a new ZIP to keep it.`);
+    return true;
+}
+
 async function unloadCmd(index) {
     const cmd = state.cmdEntries[index];
     if (!cmd) return;
@@ -2821,6 +3152,7 @@ async function unloadCmd(index) {
     }
 
     renderFileSummary();
+    renderColorBackupPanel();
     renderActiveCmdControls();
     renderCurrentChanges();
     updateExportButtons();
@@ -2935,6 +3267,73 @@ function renderActiveCmdDropdown(select) {
     updateInspectorDirtyUi();
 }
 
+function randomRgbKeepingAlpha(color) {
+    const current = slotRgba(color) ?? [0, 0, 0, 255];
+    const rgb = new Uint8Array(3);
+    if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(rgb);
+    else rgb.forEach((_, index) => { rgb[index] = Math.floor(Math.random() * 256); });
+    if (rgb[0] === current[0] && rgb[1] === current[1] && rgb[2] === current[2]) {
+        rgb[0] = (rgb[0] + 1) % 256;
+    }
+    return [rgb[0], rgb[1], rgb[2], current[3]];
+}
+
+function surpriseMaterialColors(cluster) {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    if (!cmd || !cluster) return 0;
+    const activeSlots = cluster.colors.filter(color => isSlotEnabled(color) && isSlotEditable(color));
+    let cmdSnapshots = state.surpriseSnapshots.get(cmd);
+    if (!cmdSnapshots) {
+        cmdSnapshots = new Map();
+        state.surpriseSnapshots.set(cmd, cmdSnapshots);
+    }
+    if (!cmdSnapshots.has(cluster.name)) {
+        cmdSnapshots.set(cluster.name, {
+            inspectorDirty: state.inspectorDirty,
+            slots: activeSlots.map(color => ({
+                offset: color.color.absoluteOffset,
+                rgba: slotRgba(color),
+            })),
+        });
+    }
+    for (const color of activeSlots) {
+        const rgba = randomRgbKeepingAlpha(color);
+        writeRgbaAtOffset(cmd.workingBuffer, color.color.absoluteOffset, rgba);
+        updateColorModelAtOffset(cmd, color.color.absoluteOffset, rgba);
+    }
+    if (!activeSlots.length) return 0;
+
+    state.inspectorDirty = true;
+    updateInspectorDirtyUi();
+    renderColorClusters(cmd.colorClusters);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+    return activeSlots.length;
+}
+
+function discardSurpriseMaterialColors(cluster) {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const cmdSnapshots = state.surpriseSnapshots.get(cmd);
+    const snapshot = cmdSnapshots?.get(cluster?.name);
+    if (!cmd || !snapshot) return 0;
+
+    for (const slot of snapshot.slots) {
+        writeRgbaAtOffset(cmd.workingBuffer, slot.offset, slot.rgba);
+        updateColorModelAtOffset(cmd, slot.offset, slot.rgba);
+    }
+    cmdSnapshots.delete(cluster.name);
+    if (!cmdSnapshots.size) state.surpriseSnapshots.delete(cmd);
+
+    state.inspectorDirty = snapshot.inspectorDirty;
+    updateInspectorDirtyUi();
+    renderColorClusters(cmd.colorClusters);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+    return snapshot.slots.length;
+}
+
 function renderColorClusters(clusters) {
     if (!clusterInspector) return;
     clusterInspector.innerHTML = "";
@@ -2949,7 +3348,39 @@ function renderColorClusters(clusters) {
         });
 
         const title = document.createElement("summary");
-        title.textContent = `${cluster.name} (${cluster.colors.length})`;
+        const titleText = document.createElement("span");
+        titleText.className = "cluster-card-title";
+        titleText.textContent = `${cluster.name} (${cluster.colors.length})`;
+        const surpriseButton = document.createElement("button");
+        surpriseButton.type = "button";
+        surpriseButton.className = "secondary-button cluster-surprise-button";
+        surpriseButton.textContent = "Surprise Me";
+        surpriseButton.title = "Randomize active colors in this material";
+        surpriseButton.setAttribute("aria-label", `Surprise Me: randomize active colors in ${cluster.name}`);
+        surpriseButton.disabled = !cluster.colors.some(color => isSlotEnabled(color) && isSlotEditable(color));
+        surpriseButton.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            surpriseMaterialColors(cluster);
+        });
+        const actions = document.createElement("span");
+        actions.className = "cluster-card-actions";
+        actions.appendChild(surpriseButton);
+        if (state.surpriseSnapshots.get(state.cmdEntries[state.activeCmdIndex])?.has(cluster.name)) {
+            const discardSurpriseButton = document.createElement("button");
+            discardSurpriseButton.type = "button";
+            discardSurpriseButton.className = "secondary-button cluster-surprise-discard";
+            discardSurpriseButton.textContent = "Discard Surprise";
+            discardSurpriseButton.title = "Restore this material to before Surprise Me";
+            discardSurpriseButton.setAttribute("aria-label", `Discard Surprise changes in ${cluster.name}`);
+            discardSurpriseButton.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                discardSurpriseMaterialColors(cluster);
+            });
+            actions.appendChild(discardSurpriseButton);
+        }
+        title.append(titleText, actions);
         card.appendChild(title);
 
         const list = document.createElement("div");
@@ -3432,10 +3863,6 @@ function renderSyncPanels() {
 
     // ---- Color Sync (active CMD only)
     const cs = state.colorSync;
-    const activeLabel = cmdDisplayName(activeCmd);
-    if (replaceActiveLabel) {
-        replaceActiveLabel.textContent = activeLabel;
-    }
     renderActiveCmdDropdown(colorSyncActiveCmdSelect);
     renderActiveCmdDropdown(patternSyncActiveCmdSelect);
     renderActiveCmdDropdown(replaceActiveCmdSelect);
@@ -3509,11 +3936,6 @@ function renderSyncPanels() {
 
     // ---- Pattern Sync
     const ps = state.patternSync;
-    const patternReferenceLabel = document.querySelector("#pattern-reference-label");
-    if (patternReferenceLabel) {
-        patternReferenceLabel.textContent = activeLabel;
-    }
-
     ps.sourceMaterial = buildMaterialDropdown(
         document.querySelector("#pattern-source-material"),
         {
@@ -3764,6 +4186,21 @@ function bindUi() {
         if (button) await unloadCmd(Number(button.dataset.unloadCmd));
     });
 
+    colorBackupList?.addEventListener("click", async event => {
+        const button = event.target.closest("[data-restore-color-backup]");
+        if (!button) return;
+        button.disabled = true;
+        hideStatus(colorBackupStatus);
+        try {
+            await restoreColorBackup(button.dataset.restoreColorBackup);
+        } catch (error) {
+            console.error(error);
+            showStatus(colorBackupStatus, "bad", error.message || String(error));
+        } finally {
+            button.disabled = false;
+        }
+    });
+
     unloadAllCmdsBtn?.addEventListener("click", () => {
         unloadAllCmds();
     });
@@ -3802,6 +4239,7 @@ function bindUi() {
     });
 
     saveCmdInspectorBtn?.addEventListener("click", () => {
+        state.surpriseSnapshots.clear();
         state.inspectorDirty = false;
         updateInspectorDirtyUi();
         showStatus(parserStatus, "good", "Color edits kept in working buffers.");
@@ -3825,6 +4263,7 @@ function bindUi() {
         }
 
         state.inspectorDirty = false;
+        state.surpriseSnapshots.delete(cmd);
         updateInspectorDirtyUi();
         renderColorClusters(cmd.colorClusters);
         renderCurrentChanges();
@@ -4163,6 +4602,7 @@ function setScreenshot(file, zipEntryName = null) {
 
 applyPersistedUiState();
 bindUi();
+bindSectionRail();
 refreshExportDestinationUi().catch(error => {
     console.warn("Could not load saved export folders", error);
 });

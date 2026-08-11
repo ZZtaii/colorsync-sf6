@@ -6,6 +6,9 @@ A browser-based color editor for Street Fighter 6 CMD palette files.
 
 **[Open SF6 CMD Color Sync](https://colorsync-sf6.pages.dev/)**
 
+[Feature Guide](https://colorsync-sf6.pages.dev/features) ·
+[Changelog](https://colorsync-sf6.pages.dev/changelog/)
+
 Load CMD (`.user.*`) files for the same character and costume, edit their
 CustomizeColor slots, synchronize colors between materials or palettes, and
 export modified CMD files or a game-ready mod ZIP. All file processing happens
@@ -20,6 +23,8 @@ locally in your browser—files are never uploaded to a server.
 - Review, revert, and export only staged changes.
 - Build a [Fluffy Manager](https://www.fluffyquack.com/)-ready mod ZIP with `modinfo.ini` and an optional
   screenshot.
+- Re-import mod ZIPs without losing their other files, and restore Color Sync
+  snapshots embedded in previously exported ZIPs.
 - Optionally save CMD and ZIP exports directly to remembered folders in
   Chromium browsers; other browsers use normal downloads.
 

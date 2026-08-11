@@ -59,9 +59,30 @@
                     <p class="subtitle">Edit, synchronize, and export Street Fighter 6 colors directly in your browser.</p>
                 </div>
             </div>
-            <div class="privacy-note"><span class="privacy-dot"></span>Files are processed locally. Nothing is uploaded.</div>
+            <div class="header-notices">
+                <div class="privacy-note"><span class="privacy-dot"></span>Files are processed locally. Nothing is uploaded.</div>
+                <a class="release-note" href="./changelog/#v1-1"><span class="release-dot"></span><strong>Updated to v1.1</strong><span>See what’s new →</span></a>
+            </div>
         </div>
     </header>
+
+    <nav class="section-rail" aria-label="Tool sections">
+        <a href="#file-panel" class="section-rail-link" data-section-target="#file-panel" aria-keyshortcuts="1" title="1 — Load files">
+            <span class="section-rail-number">1</span><span class="section-rail-label">Load</span>
+        </a>
+        <a href="#parser-panel" class="section-rail-link is-disabled" data-section-target="#parser-panel" aria-keyshortcuts="2" aria-disabled="true" title="2 — Edit colors">
+            <span class="section-rail-number">2</span><span class="section-rail-label">Edit</span>
+        </a>
+        <a href="#color-replace-panel" class="section-rail-link is-disabled" data-section-target="#color-replace-panel" aria-keyshortcuts="3" aria-disabled="true" title="3 — Replace colors">
+            <span class="section-rail-number">3</span><span class="section-rail-label">Replace</span>
+        </a>
+        <a href="#color-panel" class="section-rail-link is-disabled" data-section-target="#color-panel" aria-keyshortcuts="4" aria-disabled="true" title="4 — Sync colors">
+            <span class="section-rail-number">4</span><span class="section-rail-label">Sync</span>
+        </a>
+        <a href="#output-panel" class="section-rail-link is-disabled" data-section-target="#output-panel" aria-keyshortcuts="5" aria-disabled="true" title="5 — Build mod">
+            <span class="section-rail-number">5</span><span class="section-rail-label">Export</span>
+        </a>
+    </nav>
 
 
     <main class="page-width">
@@ -104,7 +125,7 @@
             </div>
 
             <div id="color-library-panel" class="status-box warn hidden">
-                <strong>This mod has no CMD palette files.</strong>
+                <strong id="color-library-heading">This mod has no CMD palette files.</strong>
                 <span id="color-library-detection"></span>
                 <label id="color-library-target-field" class="color-library-picker hidden">
                     <span>Detected character and outfit</span>
@@ -160,6 +181,18 @@
                 <div id="file-list">
                 </div>
             </div>
+
+            <details id="color-backup-panel" class="collapsible-section color-backup-panel hidden" open>
+                <summary class="collapsible-section-summary">
+                    <span>Restore Colors</span>
+                    <span id="color-backup-count" class="collapsible-section-hint"></span>
+                </summary>
+                <div class="collapsible-section-body">
+                    <p class="color-backup-description">Restore a snapshot stored in this mod ZIP. Nothing is written until you build a new ZIP.</p>
+                    <div id="color-backup-list" class="color-backup-list"></div>
+                    <div id="color-backup-status" class="status-box hidden" role="status" aria-live="polite"></div>
+                </div>
+            </details>
         </section>
 
 
@@ -398,11 +431,6 @@
                         <div class="custom-select-dropdown hidden" role="listbox"></div>
                     </div>
                 </div>
-                <p class="sync-active-line hidden">
-                    Reference CMD:
-                    <strong id="pattern-reference-label">—</strong>
-                    <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
-                </p>
                 <p id="pattern-source-note" class="sync-active-line muted-inline"></p>
 
                 <div class="form-grid">
@@ -495,7 +523,6 @@
         >
             <div class="section-title"><span class="section-number">3</span><div><h2>Replace Color Everywhere</h2><p class="section-description">
                 Search the <strong>active CMD</strong> for an exact visual CMD color and replace all matching CustomizeColor slots.
-                <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change active CMD in section 2</a>
             </p></div></div>
 
             <div class="sync-active-cmd-picker replace-active-line">
@@ -508,12 +535,6 @@
                     <div class="custom-select-dropdown hidden" role="listbox"></div>
                 </div>
             </div>
-            <p class="sync-active-line replace-active-line hidden">
-                Active CMD:
-                <strong id="replace-active-label">—</strong>
-                <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
-            </p>
-
             <div class="common-palette" data-common-palette>
                 <div class="common-palette-label">Common colors</div>
                 <div class="common-palette-swatches" data-common-palette-swatches></div>
@@ -541,7 +562,7 @@
                                     placeholder="#RRGGBBAA"
                                 >
                                 <button type="button" class="hex-paste-button" aria-label="Paste hex color" title="Paste">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
                                 </button>
                             </div>
                         </div>
@@ -571,7 +592,7 @@
                                     placeholder="#RRGGBBAA"
                                 >
                                 <button type="button" class="hex-paste-button" aria-label="Paste hex color" title="Paste">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h9a2 2 0 0 1 2 2v10h-2V6H8V4Zm-3 4h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v8h9v-8H5Z"/></svg>
                                 </button>
                             </div>
                         </div>
@@ -821,6 +842,10 @@
                     <span class="feature-guide-callout-icon" aria-hidden="true">↗</span>
                     <span><strong>Explore the Feature Guide</strong><small>See each editing and sync tool explained visually.</small></span>
                 </a>
+                <a class="feature-guide-callout" href="./changelog/">
+                    <span class="feature-guide-callout-icon" aria-hidden="true">↗</span>
+                    <span><strong>Read the Changelog</strong><small>See what shipped in v1.0 and what’s new in v1.1.</small></span>
+                </a>
             </section>
 
             <section class="info-card"><div class="info-eyebrow">Support</div><h2>Support Development</h2><p>Show support by starring this project and others in Credits. If you want to tip, I have a Patreon.</p><p class="support-community-copy">Also, shoutout to various RE tool makers and modding contributors in Haven’s Night Discord. You can ping me there <strong>@zain37</strong>.</p><div class="support-buttons"><a class="support-button github-star-button" href="https://github.com/ZZtaii/colorsync-sf6" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.3a9.7 9.7 0 0 0-3.07 18.9c.49.09.66-.21.66-.47v-1.7c-2.7.59-3.27-1.15-3.27-1.15-.44-1.13-1.08-1.43-1.08-1.43-.88-.61.07-.6.07-.6.98.07 1.49 1 1.49 1 .87 1.49 2.28 1.06 2.83.81.09-.63.34-1.06.62-1.3-2.15-.24-4.42-1.08-4.42-4.79 0-1.06.38-1.92 1-2.6-.1-.24-.43-1.24.1-2.58 0 0 .82-.26 2.67 1a9.2 9.2 0 0 1 4.86 0c1.85-1.26 2.67-1 2.67-1 .53 1.34.2 2.34.1 2.58.62.68 1 1.54 1 2.6 0 3.72-2.28 4.54-4.44 4.78.35.3.66.88.66 1.77v2.63c0 .26.18.56.67.47A9.7 9.7 0 0 0 12 2.3Z" fill="currentColor"/></svg> Star Project</a><a class="support-button discord-button" href="https://discord.gg/rZUSECRft" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 5.1A16.1 16.1 0 0 0 15.6 4l-.48.97a14.8 14.8 0 0 0-4.24 0L10.4 4a16.1 16.1 0 0 0-3.9 1.1C4.03 8.8 3.36 12.4 3.7 15.95A15.7 15.7 0 0 0 8.48 18.4l1.16-1.58a8.8 8.8 0 0 1-1.82-.87l.48-.37c3.5 1.62 7.3 1.62 10.76 0l.48.37a8.8 8.8 0 0 1-1.82.87l1.16 1.58a15.7 15.7 0 0 0 4.78-2.45c.4-4.12-.68-7.68-3.16-10.85ZM9.14 13.77c-.94 0-1.7-.86-1.7-1.91s.75-1.91 1.7-1.91c.96 0 1.72.86 1.7 1.91 0 1.05-.75 1.91-1.7 1.91Zm5.72 0c-.94 0-1.7-.86-1.7-1.91s.75-1.91 1.7-1.91c.96 0 1.72.86 1.7 1.91 0 1.05-.74 1.91-1.7 1.91Z" fill="currentColor"/></svg> Haven’s Night</a><a class="support-button patreon-button" href="https://www.patreon.com/cw/ZZtai" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M0 3h5v18H0V3Zm14.5 0a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Z" fill="currentColor"/></svg> Patreon</a></div></section>
@@ -837,7 +862,7 @@
     </main>
 
 
-    <footer class="site-footer"><div class="page-width footer-content"><div><strong>SF6 CMD Color Sync</strong><p>Street Fighter 6 color editing and synchronization.</p></div><div class="footer-links"><a href="#about-tool">Instructions</a><a href="./features">Feature guide</a><a href="#about-tool">Credits</a></div><div class="footer-meta"><p>Files never leave your browser.</p><p>Not affiliated with or endorsed by Capcom.</p></div></div></footer>
+    <footer class="site-footer"><div class="page-width footer-content"><div><strong>SF6 CMD Color Sync</strong><p>Street Fighter 6 color editing and synchronization.</p></div><div class="footer-links"><a href="#about-tool">Instructions</a><a href="./features">Feature guide</a><a href="./changelog/">Changelog</a><a href="#about-tool">Credits</a></div><div class="footer-meta"><p>Files never leave your browser.</p><p>Not affiliated with or endorsed by Capcom.</p></div></div></footer>
 
 
 
