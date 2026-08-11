@@ -810,6 +810,19 @@ async function validateFile(file) {
         };
     }
 
+    // Windows exposes members viewed inside a ZIP as virtual files. Chromium
+    // currently turns those members into zero-byte File objects when they are
+    // dragged onto a web page, so there are no archive or CMD bytes available
+    // for us to recover. Point users to the ZIP import path we can read instead
+    // of reporting the more generic missing-header error.
+    if (file.size === 0) {
+        return {
+            ok: false,
+            file,
+            reason: "This CMD arrived as an empty file. If you dragged it from inside a ZIP, drop the ZIP itself instead, or extract the CMD first.",
+        };
+    }
+
     if (!(await hasUsrMagic(file))) {
         return {
             ok: false,
