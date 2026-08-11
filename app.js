@@ -1250,6 +1250,18 @@ function clearScreenshot() {
     if (screenshotStatus) screenshotStatus.textContent = "Drop a PNG or JPG here, or click to browse.";
 }
 
+function clearReferenceImages() {
+    for (const image of state.referenceImages) {
+        if (typeof image?.src === "string" && image.src.startsWith("blob:")) {
+            URL.revokeObjectURL(image.src);
+        }
+    }
+    state.referenceImages = [];
+    state.referenceImageIndex = 0;
+    state.referenceLoading = false;
+    renderReferenceViewer();
+}
+
 async function handleModZip(file) {
     if (file.size > MAX_MOD_ZIP_BYTES) {
         throw new Error("Mod ZIP is over the 200 MiB import limit.");
@@ -1302,6 +1314,7 @@ async function handleModZip(file) {
                 throw new Error("This ZIP has no CMD files and does not expose a detectable SF6 character/outfit path.");
             }
             resetLoadedCmdState();
+            clearReferenceImages();
             clearScreenshot();
             const modinfoByRoot = Object.fromEntries(modinfoPaths.map(path => [zipEntryDirectory(path), path]));
             state.importedMod = {
@@ -1328,6 +1341,7 @@ async function handleModZip(file) {
         }
 
         resetLoadedCmdState();
+        clearReferenceImages();
         clearScreenshot();
         state.importedMod = {
             entries,
@@ -3284,8 +3298,11 @@ async function unloadCmd(index) {
         state.detectedEsfId = null;
         state.detectedCharacterName = null;
         state.detectedCostume = null;
-        state.referenceImages = [];
-        renderReferenceViewer();
+        state.importedMod = null;
+        clearReferenceImages();
+        clearScreenshot();
+        if (zipFileNameInput) zipFileNameInput.value = "";
+        updateZipFileNameField();
         colorPanel?.classList.add("hidden");
         colorReplacePanel?.classList.add("hidden");
         currentChangesPanel?.classList.add("hidden");
@@ -4265,7 +4282,7 @@ function bindUi() {
         }
     };
     colorLibraryDropZone?.addEventListener("click", event => {
-        if (event.target.closest("a")) return;
+        if (event.target === colorLibraryInput || event.target.closest("a")) return;
         chooseColorLibrary();
     });
     colorLibraryDropZone?.addEventListener("keydown", event => {

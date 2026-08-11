@@ -3704,14 +3704,24 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .modder-files-notice {
-    margin: 4px 0 0;
-    padding: 10px 12px;
-    border: 1px solid rgba(225, 173, 97, 0.32);
-    border-radius: var(--radius-small);
-    background: var(--warning-soft);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 8px 2px 14px;
     color: var(--warning);
     font-size: 0.9rem;
     line-height: 1.45;
+}
+
+.modder-files-notice-icon {
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    flex: 0 0 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
 }
 
 .zip-import-progress {
@@ -5209,5 +5219,16 @@ main.page-width {
 @media (max-width: 900px) {
     .section-rail {
         display: none;
+    }
+}
+
+/* Keep the ZIP-import-only export action aligned with the row's far edge. */
+.export-actions #export-colors-zip-button {
+    margin-left: auto;
+}
+
+@media (max-width: 720px) {
+    .export-actions #export-colors-zip-button {
+        margin-left: 0;
     }
 }
