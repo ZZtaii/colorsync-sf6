@@ -1155,6 +1155,38 @@ function missingPaletteNumbers(target = state.importedMod?.paletteTarget) {
         .filter(paletteNumber => !present.has(paletteNumber));
 }
 
+function hideColorLibraryPrompt() {
+    colorLibraryPanel?.classList.add("hidden");
+    colorLibraryPanel?.classList.remove("warn", "bad");
+    if (colorLibraryHeading) colorLibraryHeading.textContent = "";
+    if (colorLibraryDetection) colorLibraryDetection.textContent = "";
+    colorLibraryTargetField?.classList.add("hidden");
+}
+
+function refreshColorLibraryPromptAfterUnload() {
+    const target = state.importedMod?.paletteTarget;
+    if (!target || state.cmdEntries.length === 0) {
+        hideColorLibraryPrompt();
+        return;
+    }
+
+    const missing = missingPaletteNumbers(target);
+    if (!missing.length) {
+        hideColorLibraryPrompt();
+        return;
+    }
+
+    if (colorLibraryHeading) {
+        colorLibraryHeading.textContent = `This mod includes ${10 - missing.length} of 10 CMD palette files.`;
+    }
+    if (colorLibraryDetection) {
+        colorLibraryDetection.textContent = ` Add ${paletteNumberList(missing)} from SF6 Colors.zip. Existing mod colors will be kept.`;
+    }
+    colorLibraryTargetField?.classList.add("hidden");
+    colorLibraryPanel?.classList.remove("hidden", "bad");
+    colorLibraryPanel?.classList.add("warn");
+}
+
 function paletteNumberList(numbers) {
     const ranges = [];
     for (const number of numbers) {
@@ -3238,6 +3270,7 @@ async function unloadCmd(index) {
     state.cmdEntries.splice(index, 1);
     state.files.splice(index, 1);
     state.rejectedFiles = [];
+    refreshColorLibraryPromptAfterUnload();
 
     if (state.cmdEntries.length === 0) {
         state.activeCmdIndex = 0;
