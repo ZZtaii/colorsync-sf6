@@ -74,8 +74,8 @@
             class="panel"
             id="file-panel"
         >
-            <div class="section-title"><span class="section-number">1</span><div><h2>Select CMD Files</h2><p class="section-description">
-                Load one or more CMD color files from the same character and outfit.
+            <div class="section-title"><span class="section-number">1</span><div><h2>Select CMD Files or a Mod ZIP</h2><p class="section-description">
+                Load CMD files from one character and outfit, or a mod ZIP up to 200 MiB. ZIP imports preserve its other mod files, metadata, and root image for export.
             </p></div></div>
 
             <div
@@ -87,7 +87,7 @@
                 ondrop="event.preventDefault()"
             >
                 <strong>
-                    Drop CMD files here
+                    Drop CMD files or one mod ZIP here
                 </strong>
 
                 <span>
@@ -98,8 +98,50 @@
                     id="file-input"
                     type="file"
                     multiple
+                    accept=".zip,.user.*"
                     hidden
                 >
+            </div>
+
+            <div id="color-library-panel" class="status-box warn hidden">
+                <strong>This mod has no CMD palette files.</strong>
+                <span id="color-library-detection"></span>
+                <label id="color-library-target-field" class="color-library-picker hidden">
+                    <span>Detected character and outfit</span>
+                    <div id="color-library-target" class="custom-select material-select">
+                        <button type="button" class="custom-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="cs-text">Select character and outfit</span>
+                            <span class="cs-arrow">▼</span>
+                        </button>
+                        <div class="custom-select-dropdown hidden" role="listbox"></div>
+                    </div>
+                </label>
+                <div id="color-library-drop-zone" class="drop-zone color-library-picker" tabindex="0" role="button">
+                    <strong>Drop SF6 Colors.zip here</strong>
+                    <span>or click to choose the file</span>
+                    <input id="color-library-input" type="file" accept=".zip,application/zip" class="hidden">
+                    <p class="color-library-download">Don't have it? <a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files&amp;file_id=13247" target="_blank" rel="noopener noreferrer">Get SF6 Colors.zip from Nexus Mods <span aria-hidden="true">↗</span></a></p>
+                </div>
+                <details id="color-library-options" class="collapsible-section export-destinations hidden">
+                    <summary class="collapsible-section-summary">
+                        <span>Additional file options</span>
+                        <span class="collapsible-section-hint">click to expand</span>
+                    </summary>
+                    <div class="collapsible-section-body">
+                        <label id="remember-color-library-field" class="export-duplicate-option">
+                            <input id="remember-color-library" type="checkbox">
+                            <span>Remember SF6 Colors.zip on this browser (Chromium)</span>
+                        </label>
+                        <button id="forget-color-library" type="button" class="secondary-button hidden">Forget SF6 Colors.zip</button>
+                    </div>
+                </details>
+            </div>
+
+            <div id="zip-import-progress" class="zip-import-progress hidden" role="status" aria-live="polite">
+                <div class="zip-import-progress-label" id="zip-import-progress-label">Reading mod ZIP…</div>
+                <div class="zip-import-progress-track" aria-hidden="true">
+                    <div id="zip-import-progress-bar" class="zip-import-progress-bar"></div>
+                </div>
             </div>
 
             <div
@@ -258,11 +300,16 @@
 
             <!-- Color Sync: active CMD only -->
             <div id="color-sync-pane">
-                <p class="sync-active-line">
-                    Active CMD:
-                    <strong id="color-sync-active-label">—</strong>
-                    <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
-                </p>
+                <div class="sync-active-cmd-picker">
+                    <span>Active color</span>
+                    <div id="color-sync-active-cmd" class="custom-select active-cmd-select">
+                        <button type="button" class="custom-select-trigger" aria-label="Active color for Color Sync" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="cs-text">Select an active color</span>
+                            <span class="cs-arrow">▼</span>
+                        </button>
+                        <div class="custom-select-dropdown hidden" role="listbox"></div>
+                    </div>
+                </div>
 
                 <div class="common-palette" data-common-palette>
                     <div class="common-palette-label">Common colors</div>
@@ -336,7 +383,17 @@
 
             <!-- Pattern Sync: multi CMD -->
             <div id="pattern-sync-pane" class="hidden">
-                <p class="sync-active-line">
+                <div class="sync-active-cmd-picker">
+                    <span>Active color</span>
+                    <div id="pattern-sync-active-cmd" class="custom-select active-cmd-select">
+                        <button type="button" class="custom-select-trigger" aria-label="Active color for Pattern Sync" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="cs-text">Select an active color</span>
+                            <span class="cs-arrow">▼</span>
+                        </button>
+                        <div class="custom-select-dropdown hidden" role="listbox"></div>
+                    </div>
+                </div>
+                <p class="sync-active-line hidden">
                     Reference CMD:
                     <strong id="pattern-reference-label">—</strong>
                     <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
@@ -436,7 +493,17 @@
                 <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change active CMD in section 2</a>
             </p></div></div>
 
-            <p class="sync-active-line replace-active-line">
+            <div class="sync-active-cmd-picker replace-active-line">
+                <span>Active color</span>
+                <div id="replace-active-cmd" class="custom-select active-cmd-select">
+                    <button type="button" class="custom-select-trigger" aria-label="Active color for Replace Color Everywhere" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="cs-text">Select an active color</span>
+                        <span class="cs-arrow">▼</span>
+                    </button>
+                    <div class="custom-select-dropdown hidden" role="listbox"></div>
+                </div>
+            </div>
+            <p class="sync-active-line replace-active-line hidden">
                 Active CMD:
                 <strong id="replace-active-label">—</strong>
                 <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change in section 2</a>
@@ -621,8 +688,24 @@
                     >
                 </label>
 
+                <label>
+                    <span>
+                        ZIP file name
+                    </span>
+
+                    <input
+                        id="zip-file-name"
+                        type="text"
+                        placeholder="Uses mod name when left blank"
+                        autocomplete="off"
+                    >
+                </label>
+
             </div>
 
+            <p class="modder-files-notice" role="note">
+                If the mod doesn't belong to you, do not share modified files without the original creator’s permission.
+            </p>
 
             <div class="export-actions">
                 <button
@@ -845,6 +928,7 @@
                 <input id="color-picker-a" type="number" min="0" max="255">
             </label>
         </div>
+
     </div>
 
     <script
