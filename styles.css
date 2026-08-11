@@ -3220,7 +3220,8 @@ input[type="number"]::-webkit-inner-spin-button {
 #apply-pattern-sync,
 #replace-color-button,
 #build-button,
-#export-cmd-button {
+#export-cmd-button,
+#export-colors-zip-button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3806,7 +3807,8 @@ label.color-library-picker > span {
 }
 
 .export-actions #build-button,
-.export-actions #export-cmd-button {
+.export-actions #export-cmd-button,
+.export-actions #export-colors-zip-button {
     margin-top: 0;
 }
 
@@ -4955,6 +4957,62 @@ main.page-width {
     grid-area: name;
     align-self: start;
     color: var(--muted);
+    font-size: 0.72rem;
+}
+
+.color-picker-original-readout {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-areas:
+        "label label action"
+        "swatch hex action"
+        "swatch name action";
+    gap: 3px 9px;
+    padding: 10px;
+    border: 1px solid rgba(126, 146, 190, 0.24);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.color-picker-original-label {
+    grid-area: label;
+    color: var(--text);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.color-picker-original-swatch {
+    grid-area: swatch;
+    width: 36px;
+    height: 36px;
+    align-self: center;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.color-picker-original-hex {
+    grid-area: hex;
+    align-self: end;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.color-picker-original-name {
+    grid-area: name;
+    align-self: start;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+
+.color-picker-original-restore {
+    grid-area: action;
+    align-self: center;
+    min-height: 32px;
+    padding: 0 10px;
     font-size: 0.72rem;
 }
 

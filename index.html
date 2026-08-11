@@ -19,11 +19,11 @@
 
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
-    <meta property="og:title" content="SF6 CMD Color Sync — Street Fighter 6 Palette Editor">
+    <meta property="og:title" content="SF6 CMD Color Sync | Street Fighter 6 Palette Editor">
     <meta property="og:description" content="Edit, sync, and export Street Fighter 6 CMD palette files locally in your browser.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="SF6 CMD Color Sync — Street Fighter 6 Palette Editor">
+    <meta name="twitter:title" content="SF6 CMD Color Sync | Street Fighter 6 Palette Editor">
     <meta name="twitter:description" content="Edit, sync, and export Street Fighter 6 CMD palette files locally in your browser.">
 
     <title>SF6 CMD Color Sync</title>
@@ -67,19 +67,19 @@
     </header>
 
     <nav class="section-rail" aria-label="Tool sections">
-        <a href="#file-panel" class="section-rail-link" data-section-target="#file-panel" aria-keyshortcuts="1" title="1 — Load files">
+        <a href="#file-panel" class="section-rail-link" data-section-target="#file-panel" aria-keyshortcuts="1" title="1: Load files">
             <span class="section-rail-number">1</span><span class="section-rail-label">Load</span>
         </a>
-        <a href="#parser-panel" class="section-rail-link is-disabled" data-section-target="#parser-panel" aria-keyshortcuts="2" aria-disabled="true" title="2 — Edit colors">
+        <a href="#parser-panel" class="section-rail-link is-disabled" data-section-target="#parser-panel" aria-keyshortcuts="2" aria-disabled="true" title="2: Edit colors">
             <span class="section-rail-number">2</span><span class="section-rail-label">Edit</span>
         </a>
-        <a href="#color-replace-panel" class="section-rail-link is-disabled" data-section-target="#color-replace-panel" aria-keyshortcuts="3" aria-disabled="true" title="3 — Replace colors">
+        <a href="#color-replace-panel" class="section-rail-link is-disabled" data-section-target="#color-replace-panel" aria-keyshortcuts="3" aria-disabled="true" title="3: Replace colors">
             <span class="section-rail-number">3</span><span class="section-rail-label">Replace</span>
         </a>
-        <a href="#color-panel" class="section-rail-link is-disabled" data-section-target="#color-panel" aria-keyshortcuts="4" aria-disabled="true" title="4 — Sync colors">
+        <a href="#color-panel" class="section-rail-link is-disabled" data-section-target="#color-panel" aria-keyshortcuts="4" aria-disabled="true" title="4: Sync colors">
             <span class="section-rail-number">4</span><span class="section-rail-label">Sync</span>
         </a>
-        <a href="#output-panel" class="section-rail-link is-disabled" data-section-target="#output-panel" aria-keyshortcuts="5" aria-disabled="true" title="5 — Build mod">
+        <a href="#output-panel" class="section-rail-link is-disabled" data-section-target="#output-panel" aria-keyshortcuts="5" aria-disabled="true" title="5: Build mod">
             <span class="section-rail-number">5</span><span class="section-rail-label">Export</span>
         </a>
     </nav>
@@ -750,6 +750,30 @@
                 >
                     Export Modified CMD Files
                 </button>
+
+                <button
+                    id="export-colors-zip-button"
+                    type="button"
+                    class="secondary-button hidden"
+                    disabled
+                >
+                    Export Colors-Only ZIP
+                </button>
+            </div>
+
+            <div id="zip-export-progress" class="zip-import-progress hidden" role="status" aria-live="polite">
+                <div class="zip-import-progress-label" id="zip-export-progress-label">Compressing mod ZIP… 0%</div>
+                <div
+                    id="zip-export-progress-track"
+                    class="zip-import-progress-track"
+                    role="progressbar"
+                    aria-labelledby="zip-export-progress-label"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="0"
+                >
+                    <div id="zip-export-progress-bar" class="zip-import-progress-bar"></div>
+                </div>
             </div>
 
             <details id="additional-file-options" class="collapsible-section export-destinations">
@@ -782,7 +806,6 @@
                 class="status-box hidden"
             >
             </div>
-
 
             <div
                 id="build-status"
@@ -958,6 +981,14 @@
                 <span>A</span>
                 <input id="color-picker-a" type="number" min="0" max="255">
             </label>
+        </div>
+
+        <div class="color-picker-original-readout" aria-label="Original CMD color">
+            <span class="color-picker-original-label">Original color</span>
+            <span id="color-picker-original-swatch" class="color-picker-original-swatch" aria-hidden="true"></span>
+            <output id="color-picker-original-hex" class="color-picker-original-hex">#FFFFFFFF</output>
+            <span id="color-picker-original-name" class="color-picker-original-name">white</span>
+            <button id="color-picker-original-restore" type="button" class="secondary-button color-picker-original-restore">Revert</button>
         </div>
 
         <div class="color-picker-runtime-readout" aria-label="Read-only runtime and REFramework color">
