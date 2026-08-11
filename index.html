@@ -75,7 +75,7 @@
             id="file-panel"
         >
             <div class="section-title"><span class="section-number">1</span><div><h2>Select CMD Files or a Mod ZIP</h2><p class="section-description">
-                Load CMD files from one character and outfit, or a mod ZIP up to 200 MiB. ZIP imports preserve its other mod files, metadata, and root image for export.
+                Load CMD files from one character and outfit, or a mod ZIP up to 200 MiB. Standard, EX, and DX filenames are accepted; DX files are reference-only and edits may not apply in-game. ZIP imports preserve its other mod files, metadata, and root image for export.
             </p></div></div>
 
             <div
@@ -176,7 +176,7 @@
                 <div>
                     <h2>Parsed Color Data</h2>
                     <p class="section-description">
-                        Choose the active CMD, then inspect and edit its material color slots.
+                        Choose the active CMD, then inspect and edit its material color slots. Values are shown as visual CMD colors.
                     </p>
                 </div>
             </div>
@@ -186,6 +186,11 @@
                 class="status-box"
             >
             </div>
+
+            <div
+                id="dx-reference-warning"
+                class="status-box warn hidden"
+            ></div>
 
             <div
                 id="multi-cmd-inspector-notice"
@@ -489,7 +494,7 @@
             id="color-replace-panel"
         >
             <div class="section-title"><span class="section-number">3</span><div><h2>Replace Color Everywhere</h2><p class="section-description">
-                Search the <strong>active CMD</strong> for an exact RGBA color and replace all matching CustomizeColor slots.
+                Search the <strong>active CMD</strong> for an exact visual CMD color and replace all matching CustomizeColor slots.
                 <a href="#parser-panel" class="section-jump" data-jump="#parser-panel">Change active CMD in section 2</a>
             </p></div></div>
 
@@ -875,6 +880,7 @@
         id="custom-color-picker"
         class="custom-color-picker hidden"
     >
+        <div class="color-picker-space-label">Visual color</div>
         <div
             id="color-picker-sv"
             class="color-picker-sv"
@@ -927,6 +933,14 @@
                 <span>A</span>
                 <input id="color-picker-a" type="number" min="0" max="255">
             </label>
+        </div>
+
+        <div class="color-picker-runtime-readout" aria-label="Read-only runtime and REFramework color">
+            <span class="color-picker-runtime-label">Runtime / REFramework</span>
+            <span id="color-picker-runtime-swatch" class="color-picker-runtime-swatch" aria-hidden="true"></span>
+            <output id="color-picker-runtime-hex" class="color-picker-runtime-hex">#FFFFFFFF</output>
+            <span id="color-picker-runtime-name" class="color-picker-runtime-name">white</span>
+            <span class="color-picker-runtime-lock">read-only</span>
         </div>
 
     </div>

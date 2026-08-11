@@ -46,6 +46,9 @@ import {
     exportFolderName,
     saveExportFile,
 } from "./lib/export-destinations.js";
+import {
+    cmdRgbaToRuntimeRgba,
+} from "./lib/sf6-color-space.js";
 
 
 // ============================================================
@@ -89,8 +92,8 @@ const SF6_CHARACTERS = {
 
 
 const CMD_NAME_RE =
-    /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
-const CMD_VARIANT_ORDER = { standard: 0, ex: 1 };
+    /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex|dx)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
+const CMD_VARIANT_ORDER = { standard: 0, ex: 1, dx: 2 };
 const MAX_MOD_ZIP_BYTES = 200 * 1024 * 1024;
 const MAX_MOD_UNPACKED_BYTES = 300 * 1024 * 1024;
 
@@ -189,6 +192,7 @@ const forgetColorLibraryButton = document.querySelector("#forget-color-library")
 const colorLibraryOptions = document.querySelector("#color-library-options");
 const parserPanel = document.querySelector("#parser-panel");
 const parserStatus = document.querySelector("#parser-status");
+const dxReferenceWarning = document.querySelector("#dx-reference-warning");
 const fileSummary = document.querySelector("#file-summary");
 const fileList = document.querySelector("#file-list");
 const unloadAllCmdsBtn = document.querySelector("#unload-all-cmds");
@@ -282,6 +286,9 @@ const colorPickerR = document.querySelector("#color-picker-r");
 const colorPickerG = document.querySelector("#color-picker-g");
 const colorPickerB = document.querySelector("#color-picker-b");
 const colorPickerA = document.querySelector("#color-picker-a");
+const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-swatch");
+const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
+const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
 
 
 // ============================================================
@@ -318,16 +325,6 @@ function parseRgbaHex(value) {
         Number.parseInt(hex.slice(4, 6), 16),
         Number.parseInt(hex.slice(6, 8), 16),
     ];
-}
-
-function rgbaHexAtOffset(buffer, offset) {
-    const bytes = new Uint8Array(buffer, offset, 4);
-    return (
-        "#"
-        + Array.from(bytes)
-            .map(x => x.toString(16).padStart(2, "0").toUpperCase())
-            .join("")
-    );
 }
 
 function rgbaAtOffset(buffer, offset) {
@@ -652,7 +649,8 @@ function parseCmdFilename(filename) {
         paletteNumber: Number(match.groups.palette),
         paletteFolder: match.groups.palette,
         variant: match.groups.variant?.toLowerCase() ?? "standard",
-        isExtra: Boolean(match.groups.variant),
+        isExtra: match.groups.variant?.toLowerCase() === "ex",
+        isDxReference: match.groups.variant?.toLowerCase() === "dx",
         version: Number(match.groups.version),
     };
 }
@@ -1356,6 +1354,7 @@ async function handleFiles(fileCollection) {
     }
 
     const addedCount = newlyParsed.length;
+    const dxAddedCount = newlyParsed.filter(cmd => cmd.metadata.isDxReference).length;
     const skipCount = duplicates.length + mismatched.length + rejectedIncoming.length;
     let msg =
         addedCount > 0
@@ -1369,10 +1368,13 @@ async function handleFiles(fileCollection) {
     if (skipCount > 0) {
         msg += ` Skipped ${skipCount}.`;
     }
+    if (dxAddedCount > 0) {
+        msg += ` ${dxAddedCount} DX file${dxAddedCount === 1 ? " is" : "s are"} reference-only; edits may not apply in-game.`;
+    }
 
     showStatus(
         parserStatus,
-        skipCount > 0 ? "warn" : (addedCount > 0 ? "good" : "warn"),
+        (skipCount > 0 || dxAddedCount > 0) ? "warn" : (addedCount > 0 ? "good" : "warn"),
         msg,
     );
     revealStatus(parserStatus);
@@ -1499,16 +1501,16 @@ function getColorSlot(cmdEntry, materialName, slotIndex) {
     return material.colors.find(c => c.index === slotIndex) ?? null;
 }
 
-function setCmdColorSlot(cmdEntry, materialName, slotIndex, rgba, { forceEnable = true } = {}) {
+function setCmdColorSlot(cmdEntry, materialName, slotIndex, cmdRgba, { forceEnable = true } = {}) {
     const slot = getColorSlot(cmdEntry, materialName, slotIndex);
     if (!isSlotEditable(slot)) return false;
 
     writeRgbaAtOffset(
         cmdEntry.workingBuffer,
         slot.color.absoluteOffset,
-        rgba,
+        cmdRgba,
     );
-    updateColorModelAtOffset(cmdEntry, slot.color.absoluteOffset, rgba);
+    updateColorModelAtOffset(cmdEntry, slot.color.absoluteOffset, cmdRgba);
 
     if (forceEnable) forceEnableSlot(cmdEntry, slot);
     return true;
@@ -1726,9 +1728,9 @@ function getCurrentColorChanges() {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
 
-                const before = rgbaHexAtOffset(cmd.originalBuffer, offset);
-                const after = rgbaHexAtOffset(cmd.workingBuffer, offset);
-                if (before === after) continue;
+                const beforeRgba = rgbaAtOffset(cmd.originalBuffer, offset);
+                const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
+                if (rgbaEquals(beforeRgba, afterRgba)) continue;
 
                 changes.push({
                     cmdIndex,
@@ -1736,10 +1738,10 @@ function getCurrentColorChanges() {
                     slot: color.runtimeName,
                     slotIndex: color.index,
                     offset,
-                    before,
-                    after,
-                    beforeRgba: rgbaAtOffset(cmd.originalBuffer, offset),
-                    afterRgba: rgbaAtOffset(cmd.workingBuffer, offset),
+                    before: rgbaToHexString(beforeRgba),
+                    after: rgbaToHexString(afterRgba),
+                    beforeRgba,
+                    afterRgba,
                     colorRef: color,
                 });
             }
@@ -2404,6 +2406,20 @@ function hsvToRgb(h, s, v) {
     ];
 }
 
+function renderRuntimeColorReadout(visualRgba) {
+    const runtimeRgba = cmdRgbaToRuntimeRgba(visualRgba);
+    const runtimeHex = rgbaToHexString(runtimeRgba);
+
+    if (colorPickerRuntimeSwatch) {
+        colorPickerRuntimeSwatch.style.background = runtimeHex;
+        colorPickerRuntimeSwatch.title = runtimeHex;
+    }
+    if (colorPickerRuntimeHex) colorPickerRuntimeHex.textContent = runtimeHex;
+    if (colorPickerRuntimeName) {
+        colorPickerRuntimeName.textContent = describeColorName(runtimeRgba);
+    }
+}
+
 function syncPickerFromRgba(rgba, { skipHex = false } = {}) {
     colorPickerState.rgba = rgba.map(clampByte);
     colorPickerState.hsv = rgbToHsv(rgba[0], rgba[1], rgba[2]);
@@ -2416,6 +2432,7 @@ function syncPickerFromRgba(rgba, { skipHex = false } = {}) {
     if (colorPickerB) colorPickerB.value = colorPickerState.rgba[2];
     if (colorPickerA) colorPickerA.value = colorPickerState.rgba[3];
     if (colorPickerHue) colorPickerHue.value = String(Math.round(colorPickerState.hsv.h));
+    renderRuntimeColorReadout(colorPickerState.rgba);
 
     if (colorPickerSv) {
         const hueRgb = hsvToRgb(colorPickerState.hsv.h, 1, 1);
@@ -2746,10 +2763,14 @@ function renderFileSummary() {
     state.cmdEntries.forEach((cmd, index) => {
         const row = document.createElement("div");
         row.className = "file-list-item";
+        if (cmd.metadata.isDxReference) row.classList.add("dx-reference");
         row.innerHTML =
             `<strong>${cmdDisplayName(cmd)}</strong>`
             + `<span>${cmd.file.name} · ${formatBytes(cmd.file.size)}</span>`
-            + `<span>${cmd.colorClusters.length} materials</span>`;
+            + `<span>${cmd.colorClusters.length} materials</span>`
+            + (cmd.metadata.isDxReference
+                ? `<span class="dx-reference-note">DX reference only · edits may not apply in-game</span>`
+                : "");
         const unload = document.createElement("button");
         unload.type = "button";
         unload.className = "secondary-button file-unload-button";
@@ -2853,6 +2874,24 @@ function renderActiveCmdControls() {
     inspectorToolbar?.classList.toggle("hidden", state.cmdEntries.length === 0);
 
     renderActiveCmdDropdown(activeCmdSelect);
+    updateDxReferenceWarning();
+}
+
+function updateDxReferenceWarning() {
+    if (!dxReferenceWarning) return;
+
+    const dxCmds = state.cmdEntries.filter(cmd => cmd.metadata.isDxReference);
+    if (!dxCmds.length) {
+        dxReferenceWarning.classList.add("hidden");
+        dxReferenceWarning.textContent = "";
+        return;
+    }
+
+    const activeIsDx = state.cmdEntries[state.activeCmdIndex]?.metadata.isDxReference;
+    dxReferenceWarning.classList.remove("hidden");
+    dxReferenceWarning.innerHTML = activeIsDx
+        ? `<strong>DX reference file:</strong> Edits may not apply in-game. Use this file as reference only.`
+        : `<strong>DX files loaded:</strong> Their edits may not apply in-game. Use DX files as reference only.`;
 }
 
 function renderActiveCmdDropdown(select) {

@@ -4793,3 +4793,82 @@ main.page-width {
 #current-changes-panel { order: 5; }
 #output-panel { order: 6; }
 #about-tool { order: 7; }
+
+/* Keep visual editing primary; expose decoded runtime values as context. */
+.color-picker-space-label {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.color-picker-runtime-readout {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-areas:
+        "label label lock"
+        "swatch hex hex"
+        "swatch name name";
+    gap: 3px 9px;
+    padding: 10px;
+    border: 1px solid rgba(126, 146, 190, 0.24);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.color-picker-runtime-label {
+    grid-area: label;
+    color: var(--text);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.color-picker-runtime-lock {
+    grid-area: lock;
+    align-self: center;
+    color: var(--muted);
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.color-picker-runtime-swatch {
+    grid-area: swatch;
+    width: 36px;
+    height: 36px;
+    align-self: center;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.color-picker-runtime-hex {
+    grid-area: hex;
+    align-self: end;
+    color: var(--text);
+    font-family: monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.color-picker-runtime-name {
+    grid-area: name;
+    align-self: start;
+    color: var(--muted);
+    font-size: 0.72rem;
+}
+
+/* DX palettes can be inspected and edited, but are not guaranteed game-active. */
+.file-list-item.dx-reference {
+    padding-left: 10px;
+    border-left: 3px solid rgba(245, 184, 76, 0.72);
+}
+
+.file-list-item .dx-reference-note {
+    color: var(--warning, #f5b84c);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
