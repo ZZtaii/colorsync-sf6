@@ -149,6 +149,8 @@ const state = {
     // When CMDs came from a mod archive, retain every original entry so ZIP
     // export only changes the edited CMDs and modinfo.ini.
     importedMod: null,
+    rememberedColorLibraryHandle: null,
+    rememberedColorLibraryFile: null,
 
     syncMode: "color", // "color" | "pattern"
 
@@ -998,8 +1000,11 @@ function readZipWithProgress(file) {
 
 function colorLibraryHandleStore() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open("sf6-color-sync-library", 1);
-        request.onupgradeneeded = () => request.result.createObjectStore("handles");
+        const request = indexedDB.open("sf6-color-sync-library", 2);
+        request.onupgradeneeded = () => {
+            if (!request.result.objectStoreNames.contains("handles")) request.result.createObjectStore("handles");
+            if (!request.result.objectStoreNames.contains("files")) request.result.createObjectStore("files");
+        };
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
     });
@@ -1027,11 +1032,43 @@ async function getRememberedColorLibraryHandle() {
     return handle;
 }
 
+async function rememberColorLibraryFile(file) {
+    const db = await colorLibraryHandleStore();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction("files", "readwrite");
+        tx.objectStore("files").put({
+            name: file.name,
+            type: file.type || "application/zip",
+            lastModified: file.lastModified || Date.now(),
+            blob: file.slice(0, file.size, file.type || "application/zip"),
+        }, "sf6-colors");
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+}
+
+async function getRememberedColorLibraryFile() {
+    const db = await colorLibraryHandleStore();
+    const stored = await new Promise((resolve, reject) => {
+        const request = db.transaction("files", "readonly").objectStore("files").get("sf6-colors");
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+    });
+    db.close();
+    if (!stored?.blob) return null;
+    return new File([stored.blob], stored.name || "SF6 Colors.zip", {
+        type: stored.type || "application/zip",
+        lastModified: stored.lastModified || Date.now(),
+    });
+}
+
 async function forgetRememberedColorLibraryHandle() {
     const db = await colorLibraryHandleStore();
     await new Promise((resolve, reject) => {
-        const tx = db.transaction("handles", "readwrite");
+        const tx = db.transaction(["handles", "files"], "readwrite");
         tx.objectStore("handles").delete("sf6-colors");
+        tx.objectStore("files").delete("sf6-colors");
         tx.oncomplete = resolve;
         tx.onerror = () => reject(tx.error);
     });
@@ -1204,11 +1241,19 @@ function paletteNumberList(numbers) {
 }
 
 async function prepareColorLibraryPicker() {
-    if ("showOpenFilePicker" in window) {
-        state.rememberedColorLibraryHandle = await getRememberedColorLibraryHandle().catch(() => null);
+    if ("indexedDB" in window) {
+        const [file, handle] = await Promise.all([
+            getRememberedColorLibraryFile().catch(() => null),
+            "showOpenFilePicker" in window
+                ? getRememberedColorLibraryHandle().catch(() => null)
+                : Promise.resolve(null),
+        ]);
+        state.rememberedColorLibraryFile = file;
+        state.rememberedColorLibraryHandle = handle;
         colorLibraryOptions?.classList.remove("hidden");
-        forgetColorLibraryButton?.classList.toggle("hidden", !state.rememberedColorLibraryHandle);
-        if (rememberColorLibraryInput) rememberColorLibraryInput.checked = Boolean(state.rememberedColorLibraryHandle);
+        const remembered = Boolean(file || handle);
+        forgetColorLibraryButton?.classList.toggle("hidden", !remembered);
+        if (rememberColorLibraryInput) rememberColorLibraryInput.checked = remembered;
     } else {
         colorLibraryOptions?.classList.add("hidden");
         forgetColorLibraryButton?.classList.add("hidden");
@@ -4231,6 +4276,7 @@ function bindUi() {
         try {
             await forgetRememberedColorLibraryHandle();
             state.rememberedColorLibraryHandle = null;
+            state.rememberedColorLibraryFile = null;
             if (rememberColorLibraryInput) rememberColorLibraryInput.checked = false;
             forgetColorLibraryButton.classList.add("hidden");
         } catch (error) {
@@ -4240,7 +4286,18 @@ function bindUi() {
     });
     const chooseColorLibrary = async () => {
         try {
-            if (!(rememberColorLibraryInput?.checked && "showOpenFilePicker" in window)) {
+            if (!rememberColorLibraryInput?.checked) {
+                colorLibraryInput?.click();
+                return;
+            }
+            const cachedFile = state.rememberedColorLibraryFile
+                || await getRememberedColorLibraryFile().catch(() => null);
+            if (cachedFile) {
+                state.rememberedColorLibraryFile = cachedFile;
+                await loadCmdsFromColorLibrary(cachedFile);
+                return;
+            }
+            if (!("showOpenFilePicker" in window)) {
                 colorLibraryInput?.click();
                 return;
             }
@@ -4259,6 +4316,8 @@ function bindUi() {
                 throw new Error("Chromium needs permission to read the remembered SF6 Colors.zip. Click the picker again and allow access.");
             }
             await loadCmdsFromColorLibrary(rememberedFile);
+            await rememberColorLibraryFile(rememberedFile);
+            state.rememberedColorLibraryFile = rememberedFile;
         } catch (error) {
             if (error?.name === "AbortError") return;
             console.error(error);
@@ -4279,6 +4338,11 @@ function bindUi() {
         if (!file) return;
         try {
             await loadCmdsFromColorLibrary(file);
+            if (rememberColorLibraryInput?.checked) {
+                await rememberColorLibraryFile(file);
+                state.rememberedColorLibraryFile = file;
+                forgetColorLibraryButton?.classList.remove("hidden");
+            }
         } catch (error) {
             console.error(error);
             showColorLibraryError(error);
@@ -4300,6 +4364,11 @@ function bindUi() {
         if (!file) return;
         try {
             await loadCmdsFromColorLibrary(file);
+            if (rememberColorLibraryInput?.checked) {
+                await rememberColorLibraryFile(file);
+                state.rememberedColorLibraryFile = file;
+                forgetColorLibraryButton?.classList.remove("hidden");
+            }
         } catch (error) {
             console.error(error);
             showColorLibraryError(error);
