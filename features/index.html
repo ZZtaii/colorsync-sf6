@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Learn how to edit, sync, replace, and export Street Fighter 6 CMD palette colors with SF6 CMD Color Sync.">
+    <link rel="icon" href="../data/favicon.svg" type="image/svg+xml">
     <meta name="robots" content="index,follow">
     <link rel="canonical" href="https://colorsync-sf6.pages.dev/features">
     <meta property="og:type" content="website">
@@ -14,7 +15,7 @@
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="SF6 CMD Color Sync Feature Guide">
     <meta name="twitter:description" content="A visual guide to editing, syncing, replacing, and exporting Street Fighter 6 CMD palette colors.">
-    <title>Feature Guide — SF6 CMD Color Sync</title>
+    <title>Feature Guide | SF6 CMD Color Sync</title>
     <style>
         :root {
             color-scheme: dark;
@@ -38,6 +39,10 @@
         .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
         .top { padding: 20px 0; border-bottom: 1px solid var(--line); }
         .back { font-weight: 700; text-decoration: none; }
+        .guide-nav { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+        .guide-nav-links { display: flex; gap: 18px; }
+        .guide-nav-links a { color: var(--muted); font-weight: 700; text-decoration: none; }
+        .guide-nav-links a[aria-current="page"], .guide-nav-links a:hover { color: var(--blue); }
         .hero { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 28px 48px; padding: 58px 0 48px; }
         .hero::after { content: ""; position: absolute; inset: 38px 0 28px; z-index: -1; border: 1px solid rgba(126, 167, 255, .18); border-radius: 24px; background: linear-gradient(115deg, rgba(47, 76, 116, .34), rgba(29, 35, 45, .12) 62%); }
         .hero-copy { padding: 28px 30px 0; max-width: 850px; }
@@ -83,6 +88,7 @@
         .rule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin-top: 25px; }
         .rule { padding: 20px; }
         .rule-icon { display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 14px; border-radius: 10px; background: var(--blue-soft); color: var(--blue); font-weight: 900; }
+        #runtime-dx .rule-icon { width: fit-content; min-width: 34px; padding: 0 8px; font-size: .72rem; }
         .screenshot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 25px; }
         .screenshot-slot { min-height: 210px; display: grid; place-items: center; padding: 24px; text-align: center; border-style: dashed; color: var(--muted); }
         .screenshot-slot b { display: block; color: var(--text); margin-bottom: 5px; }
@@ -93,11 +99,12 @@
         .filename-guide img { display: block; width: 100%; height: auto; }
         .filename-guide figcaption { padding: 14px 18px; border-top: 1px solid var(--line); color: var(--muted); }
         .filename-guide b { color: var(--text); }
+        .runtime-cards { grid-template-columns: 1fr; margin-top: 0; }
         .footer { padding: 44px 0 60px; color: var(--muted); }
         /* Keep the guide in the same tool order as the editor. */
         main.wrap { display: flex; flex-direction: column; }
         main.wrap > .hero { order: 1; }
-        main.wrap > :not(.hero):not(#direct-editing):not(#replace-everywhere):not(#color-sync):not(#pattern-sync):not(#custom-reference-images):not(#inactive-slots):not(#review-changes):not(#export) { order: 2; }
+        main.wrap > :not(.hero):not(#direct-editing):not(#replace-everywhere):not(#color-sync):not(#pattern-sync):not(#custom-reference-images):not(#inactive-slots):not(#review-changes):not(#export):not(#mod-zip-import):not(#color-library-import):not(#restore-colors):not(#runtime-dx) { order: 2; }
         #direct-editing { order: 3; }
         #replace-everywhere { order: 4; }
         #color-sync { order: 5; }
@@ -106,6 +113,10 @@
         #inactive-slots { order: 8; }
         #review-changes { order: 9; }
         #export { order: 10; }
+        #mod-zip-import { order: 11; }
+        #color-library-import { order: 12; }
+        #restore-colors { order: 13; }
+        #runtime-dx { order: 14; }
         @media (max-width: 760px) {
             .wrap { width: min(100% - 28px, 1120px); }
             .hero { grid-template-columns: 1fr; gap: 20px; padding: 36px 0 38px; }
@@ -114,11 +125,12 @@
             .hero-aside { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; padding: 0 22px 22px; }
             .workflow, .cards, .comparison, .rule-grid, .screenshot-grid, .feature-layout { grid-template-columns: 1fr; }
             .step:not(:last-child)::after { top: auto; bottom: -13px; right: 50%; transform: translateX(50%) rotate(90deg); }
+            .guide-nav { align-items: flex-start; flex-direction: column; }
         }
     </style>
 </head>
 <body>
-    <header class="top"><div class="wrap"><a class="back" href="../">← Back to SF6 CMD Color Sync</a></div></header>
+    <header class="top"><nav class="wrap guide-nav" aria-label="Site navigation"><a class="back" href="../">&larr; Back to SF6 CMD Color Sync</a><span class="guide-nav-links"><a href="./" aria-current="page">Feature Guide</a><a href="../changelog/">Changelog</a></span></nav></header>
     <main class="wrap">
         <section class="hero">
             <div class="hero-copy">
@@ -127,7 +139,7 @@
                 <p class="lead">Edit CMD palette files locally, inspect every slot, and export only the changes you intend.</p>
             </div>
             <div class="hero-aside" aria-label="Guide highlights">
-                <span><b>8 features</b><br>shown step by step</span>
+                <span><b>14 features</b><br>shown step by step</span>
                 <span><b>Browser-only</b><br>your files stay local</span>
             </div>
         </section>
@@ -153,23 +165,23 @@
         <section class="section" id="direct-editing">
             <div class="eyebrow">Feature 1</div>
             <h2>Direct editing</h2>
-            <div class="feature-layout"><div><p class="section-intro">Choose an active CMD, open a material in Parsed Color Data, and edit a single CustomizeColor slot. The change affects only that palette and stays staged until you export it or revert it.</p><div class="diagram"><div class="node source"><span><strong>Active CMD</strong><small>Open one material and select a color slot</small></span></div><div class="arrow">&darr; edit RGBA</div><div class="node target"><span><strong>That one slot changes</strong><small>Other CMD files are untouched</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/direct-editing-ui.webp" alt="Parsed Color Data for Mai C1 Color 2 with Body00 expanded and the teal CustomizeColor_1 editor open."><figcaption><b>Direct color edit</b>Open a slot's picker to set its exact RGBA value; inactive slots remain clearly marked.</figcaption></figure></div>
+            <div class="feature-layout"><div><p class="section-intro">Choose an active CMD, open a material in Parsed Color Data, and edit a single CustomizeColor slot. The change affects only that palette and stays staged until you export it or revert it. Use Surprise Me on an expanded material to randomize its active colors, then keep them or discard the surprise.</p><div class="diagram"><div class="node source"><span><strong>Active CMD</strong><small>Open one material and select a color slot</small></span></div><div class="arrow">&darr; edit RGBA</div><div class="node target"><span><strong>That one slot changes</strong><small>Other CMD files are untouched</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/direct-editing-ui.webp" alt="Parsed Color Data for Mai C1 Color 2 with Body00 expanded and the teal CustomizeColor_1 editor open."><figcaption><b>Direct color edit</b>Open a slot's picker to set its exact RGBA value; inactive slots remain clearly marked.</figcaption></figure></div>
         </section>
 
         <section class="section" id="color-sync">
-            <div class="eyebrow">Feature 3</div>
+            <div class="eyebrow">Feature 2</div>
             <h2>Color Sync</h2>
             <div class="feature-layout"><div><p class="section-intro">Use Color Sync to copy one source slot to one or more target slots in the active CMD. You can copy across materials and across CustomizeColor indexes. Every selected target receives the source slot's exact RGBA value.</p><div class="diagram" aria-label="Color Sync diagram"><div class="node source"><span><strong>Active CMD source</strong><small>Body00 &middot; CustomizeColor_1</small></span><span class="swatch" style="background:#4f89d6"></span></div><div class="arrow">&darr; exact RGBA value</div><div class="fan"><div class="node target"><span><strong>Target material</strong><small>Trim00</small></span></div><div class="arrow">&rarr;</div><div class="mini-stack"><div class="mini-node">CustomizeColor_2</div><div class="mini-node">CustomizeColor_4</div></div></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/color-sync-ui.webp" alt="Color Sync panel with Mai C1 Color 2, a yellow source slot, and two teal Body00 target slots selected."><figcaption><b>Color Sync panel</b>Copy the active CMD's yellow source color into the two selected Body00 target slots.</figcaption></figure></div>
         </section>
 
         <section class="section" id="pattern-sync">
-            <div class="eyebrow">Feature 4</div>
+            <div class="eyebrow">Feature 3</div>
             <h2>Pattern Sync</h2>
             <div class="feature-layout"><div><p class="section-intro">Apply one mapping to the selected <strong>Color 4 CMD</strong>.</p><div class="diagram" aria-label="Pattern Sync example for Color 4"><div class="node source"><span><strong>Color 4 source</strong><small>esf_ClothB_Chaps &middot; CustomizeColor_0</small></span><span class="swatch" style="background:#400082"></span></div><div class="arrow">&darr; exact RGBA value</div><div class="fan"><div class="node target"><span><strong>Target material</strong><small>esf_ClothB_Tights</small></span></div><div class="arrow">&rarr;</div><div class="mini-stack"><div class="mini-node">CustomizeColor_0</div></div></div></div><p class="caption">Color 4's Chaps color is copied to its Tights slot.</p><p class="caption"><strong>Across multiple CMDs:</strong> the same mapping is repeated, but each CMD reads its own ClothB_Chaps color and applies it to the selected slots in its own target material.</p></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/pattern-sync-ui.webp" alt="Pattern Sync panel with a dark-indigo Chaps source, the Tights CustomizeColor_0 target selected, and Color 4 checked as the target CMD."><figcaption><b>Pattern Sync panel</b>Map Chaps CustomizeColor_0 to the selected Tights slot, select Color 4, then apply.</figcaption></figure></div>
         </section>
 
         <section class="section" id="replace-everywhere">
-            <div class="eyebrow">Feature 2</div>
+            <div class="eyebrow">Feature 4</div>
             <h2>Replace Color Everywhere</h2>
             <div class="feature-layout"><div><p class="section-intro">Choose a Find Color and a Replace With color. The tool searches editable slots in the active CMD only, then replaces slots whose full RGBA value exactly matches the find color. Other loaded CMDs are not changed.</p><div class="diagram"><div class="node source"><span><strong>Find exact RGBA</strong><small>For example: #4F89D6FF</small></span></div><div class="arrow">&darr; matching slots in active CMD only</div><div class="node target"><span><strong>Replace with new RGBA</strong><small>Every exact match is staged for review</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/replace-everywhere-ui.webp" alt="Replace Color Everywhere panel showing four matching Color 5 slots replaced from indigo to muted red."><figcaption><b>Replace Everywhere panel</b>The result lists the four exact RGBA matches staged in the active Color 5 CMD.</figcaption></figure></div>
         </section>
@@ -180,24 +192,55 @@
             <div class="feature-layout"><div><p class="section-intro">Use the <strong>+</strong> button in the reference viewer to add your own PNG, JPG, or WebP image. It is useful for a custom mod preview, a color idea, or any visual reference you want to keep beside the editor. Added images stay local to your browser session.</p><div class="diagram"><div class="node source"><span><strong>Open the reference viewer</strong><small>Hover it to reveal the controls</small></span></div><div class="arrow">&darr; choose + Add image</div><div class="node target"><span><strong>Your reference joins the viewer</strong><small>Use the arrows or Left/Right keys to browse it</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/custom-reference-images-ui.webp" alt="SF6 CMD Color Sync with a custom Chun-Li reference image added to the reference viewer."><figcaption><b>Custom reference image</b>Add a personal visual reference from the viewer’s + button.</figcaption></figure></div>
         </section>
 
-        <section class="section" id="inactive-slots">
+        <section class="section" id="section-navigation">
             <div class="eyebrow">Feature 6</div>
+            <h2>Jump between tool sections</h2>
+            <div class="feature-layout"><div><p class="section-intro">Use the section rail to move directly between Load, Edit, Replace, Sync, and Export. Press the matching number key from 1–5 for the same shortcut. Sections remain unavailable until their tools are ready, and number shortcuts do not fire while you are typing or using a control.</p><div class="diagram"><div class="node source"><span><strong>Click a rail item</strong><small>The current section is highlighted</small></span></div><div class="arrow">or press 1–5</div><div class="node target"><span><strong>Jump to that section</strong><small>The rail becomes a compact bottom bar on smaller screens</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/section-navigation-ui.png" alt="Build Mod section with the numbered section rail on the left and Export highlighted."><figcaption><b>Fast section navigation</b></figcaption></figure></div>
+        </section>
+
+        <section class="section" id="inactive-slots">
+            <div class="eyebrow">Feature 7</div>
             <h2>Inactive slot handling</h2>
             <div class="feature-layout"><div><p class="section-intro">An inactive slot cannot be used as a Color Sync source, and Pattern Sync skips inactive sources. This avoids copying a color from a part of the palette that the CMD has turned off. When a sync writes to a target with an enable field, the target is enabled where possible.</p><div class="diagram"><div class="node inactive"><span><strong>Inactive source</strong><small>Cannot be copied</small></span><span>&times;</span></div><div class="arrow">&darr;</div><div class="node source"><span><strong>Active source</strong><small>Safe to sync</small></span><span>&check;</span></div><div class="arrow">&darr;</div><div class="node target"><span><strong>Target slot</strong><small>Receives color and is enabled when supported</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/direct-editing-ui.webp" alt="Parsed color slots including an inactive CustomizeColor row."><figcaption><b>Inactive indicator</b>The inactive badge makes slots that cannot be used as sources easy to spot.</figcaption></figure></div>
         </section>
 
         <section class="section" id="review-changes">
-            <div class="eyebrow">Feature 7</div>
+            <div class="eyebrow">Feature 8</div>
             <h2>Current Changes and revert</h2>
             <div class="feature-layout"><div><p class="section-intro">Every direct edit, sync, and replacement is staged. Current Changes shows what will be exported so you can inspect an individual result, edit again, revert one change, or revert everything before creating files.</p><div class="diagram"><div class="node source"><span><strong>Staged edits</strong><small>Direct edit, Color Sync, Pattern Sync, or replace</small></span></div><div class="arrow">&darr; review</div><div class="node"><span><strong>Keep or revert</strong><small>Nothing is exported until you choose to export</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/current-changes-ui.webp" alt="Current Changes panel showing four staged Color 5 replacements with a Revert button for each slot."><figcaption><b>Current Changes</b>Review every staged slot change and revert any individual result before export.</figcaption></figure></div>
         </section>
 
         <section class="section" id="export">
-            <div class="eyebrow">Feature 8</div>
+            <div class="eyebrow">Feature 9</div>
             <h2>Export CMD files or a mod ZIP</h2>
             <div class="feature-layout"><div><p class="section-intro">Export modified CMD files directly, or build a game-ready mod ZIP with the expected game path and mod information. Additional file options can save to a chosen folder in supported Chromium browsers; otherwise exports use the browser's normal download flow.</p><div class="diagram"><div class="node source"><span><strong>Reviewed staged changes</strong><small>One or more edited CMD files</small></span></div><div class="arrow">&darr; choose export type</div><div class="fan"><div class="node target"><span><strong>Modified CMDs</strong><small>Browser download or saved folder</small></span></div><div class="arrow">or</div><div class="node target"><span><strong>Mod ZIP</strong><small>Ready for installation</small></span></div></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/export-result.webp" alt="Mai wearing the final exported color mod in Street Fighter 6."><figcaption><b>Final result in game</b>The exported mod applied successfully.</figcaption></figure></div>
         </section>
+
+        <section class="section" id="mod-zip-import">
+            <div class="eyebrow">Feature 10</div>
+            <h2>Edit an existing mod ZIP</h2>
+            <div class="feature-layout"><div><p class="section-intro">Drop an existing SF6 mod ZIP directly into Color Sync. The app finds its CMD palettes, reads the existing mod name, description, author, and screenshot, then preserves every other archive entry when you build the edited ZIP.</p><div class="diagram"><div class="node source"><span><strong>Existing mod ZIP</strong><small>CMD palettes, modinfo, screenshot, meshes, textures, and other files</small></span></div><div class="arrow">&darr; import locally</div><div class="node target"><span><strong>Edit only the colors</strong><small>Unrelated mod files remain byte-for-byte preserved</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/mod-zip-import-ui.png" alt="Build Mod panel after importing Black Widow Colors, showing the preserved mod name, description, author, and screenshot."><figcaption><b>Existing ZIP metadata preserved</b></figcaption></figure></div>
+        </section>
+
+        <section class="section" id="color-library-import">
+            <div class="eyebrow">Feature 11</div>
+            <h2>Fill missing CMD palettes</h2>
+            <div class="feature-layout"><div><p class="section-intro">Whether a costume mod includes only some of Colors 1–10 or has no CMD files at all, Color Sync detects the character and outfit, keeps every palette supplied by the mod, and imports only the missing standard palettes from SF6 Colors.zip.</p><div class="diagram"><div class="node source"><span><strong>Mod ZIP with a partial color set</strong><small>Existing mod palettes remain authoritative</small></span></div><div class="arrow">+</div><div class="node"><span><strong>SF6 Colors.zip</strong><small>Only missing Colors 1–10 are selected locally</small></span></div><div class="arrow">&darr;</div><div class="node target"><span><strong>Complete editable color set</strong><small>Changed additions use the mod’s correct game path on export</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/color-library-import-ui.png" alt="Color Sync detecting missing CMD palette files and asking for SF6 Colors.zip."><figcaption><b>Missing palette detection</b>The app keeps the mod’s own colors and fills only the gaps from the shared color library.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="restore-colors">
+            <div class="eyebrow">Feature 12</div>
+            <h2>Restore previous color snapshots</h2>
+            <div class="feature-layout"><div><p class="section-intro">Color Sync exports carry a versioned backup history inside backup_colors. Re-import the ZIP to restore the first preserved color set or a dated pre-export snapshot. A restore remains staged, reviewable, and reversible until you build another ZIP.</p><div class="diagram"><div class="node source"><span><strong>Original colors</strong><small>The first CMD color set preserved by Color Sync</small></span></div><div class="node"><span><strong>Dated snapshots</strong><small>The state immediately before each later export</small></span></div><div class="arrow">&darr; restore selected snapshot</div><div class="node target"><span><strong>Pending Current Changes</strong><small>Review or revert before writing a new ZIP</small></span></div></div></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/restore-colors-ui.png" alt="Restore Colors panel showing a dated pre-export snapshot, Original colors, and a successful four-CMD restore."><figcaption><b>Manifest-backed restore</b>Restore a recognized snapshot, review the staged result, then build a new ZIP to keep it.</figcaption></figure></div>
+        </section>
+
+        <section class="section" id="runtime-dx">
+            <div class="eyebrow">Feature 13</div>
+            <h2>Runtime color context and DX references</h2>
+            <div class="feature-layout"><div class="cards runtime-cards"><article class="feature-card"><div class="rule-icon">RGB</div><h3>Runtime / REFramework readout</h3><p class="caption">The editor continues to use visual CMD sRGB values while the color picker also shows the decoded linear RGB value exposed at runtime. Alpha is unchanged.</p><div class="comparison one-cmd"><div class="palette"><div class="palette-title">Visual CMD color &rarr; runtime readout</div><div class="swatches"><span class="swatch" style="background:#6D3D3D"></span><span class="arrow">&rarr;</span><span class="swatch" style="background:#270C0C"></span></div></div></div></article><article class="feature-card"><div class="rule-icon">DX</div><h3>DX palette inspection</h3><p class="caption">CMD DX files can be loaded, inspected, and edited as reference palettes. They remain clearly labeled reference-only because their changes may not apply in game.</p><div class="node inactive"><span><strong>DX reference</strong><small>Visible and inspectable, with an explicit in-game warning</small></span></div></article></div><figure class="screenshot-slot ui-shot"><img src="../data/feature-guide/runtime-color-readout-ui.png" alt="Color picker showing visual magenta CMD values and the read-only Runtime / REFramework color beneath them."><figcaption><b>Two color spaces, clearly separated</b>The visual color remains editable while the decoded runtime value is read-only context.</figcaption></figure></div>
+        </section>
+
     </main>
-    <footer class="footer"><div class="wrap"><a class="back" href="../">&larr; Back to SF6 CMD Color Sync</a></div></footer>
+    <footer class="footer"><div class="wrap guide-nav"><a class="back" href="../">&larr; Back to SF6 CMD Color Sync</a><span class="guide-nav-links"><a href="./">Feature Guide</a><a href="../changelog/">Changelog</a></span></div></footer>
 </body>
 </html>
