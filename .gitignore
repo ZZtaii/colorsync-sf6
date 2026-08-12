@@ -12,6 +12,7 @@ Desktop.ini
 
 # Local agent instructions and workspace state
 AGENTS.md
+HANDOFF.md
 HOSTING.md
 .agents/
 .codex/

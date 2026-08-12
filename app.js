@@ -4213,8 +4213,13 @@ function renderColorClusters(clusters) {
                 const rgba = slotRgba(color) ?? [0, 0, 0, 255];
                 const activeCmd = state.cmdEntries[state.activeCmdIndex];
                 const offset = color.color?.absoluteOffset;
+                // Custom MDF materials are appended during a targeted RSZ
+                // rebuild, so their offsets do not exist in originalBuffer.
+                // semanticBaselineBuffer is the immutable post-rebuild
+                // baseline used for color diffs and restores.
+                const baseline = activeCmd?.semanticBaselineBuffer ?? activeCmd?.originalBuffer;
                 const originalRgba = activeCmd && Number.isInteger(offset)
-                    ? rgbaAtOffset(activeCmd.originalBuffer, offset)
+                    ? rgbaAtOffset(baseline, offset)
                     : rgba;
                 openCustomColorPicker(swatch, rgba, newRgba => {
                     hexInput.value = rgbaToHexString(newRgba);
@@ -5150,7 +5155,10 @@ function bindUi() {
                 renderCurrentChanges();
                 renderSyncPanels();
             }, {
-                originalRgba: rgbaAtOffset(cmd.originalBuffer, slot.color.absoluteOffset),
+                originalRgba: rgbaAtOffset(
+                    cmd.semanticBaselineBuffer ?? cmd.originalBuffer,
+                    slot.color.absoluteOffset,
+                ),
             });
         });
 
