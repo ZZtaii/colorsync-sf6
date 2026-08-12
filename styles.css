@@ -1147,6 +1147,20 @@ button:disabled {
    CLUSTER INSPECTOR
    ============================================================ */
 
+.cluster-group-heading {
+    margin: 18px 2px 8px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.cluster-group-heading.is-custom {
+    margin-top: 12px;
+    color: var(--accent);
+}
+
 .cluster-card {
     margin-top:
         14px;
@@ -4348,7 +4362,7 @@ body.is-resizing-reference {
         minmax(150px, 1.1fr)
         minmax(110px, 0.9fr)
         minmax(140px, 1.1fr)
-        78px !important;
+        96px !important;
     align-items: center !important;
     gap: 12px !important;
     min-height: 56px !important;
@@ -4385,8 +4399,8 @@ body.is-resizing-reference {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
-    width: 78px !important;
-    min-width: 78px !important;
+    width: 96px !important;
+    min-width: 96px !important;
     height: 26px !important;
     margin: 0 !important;
     padding: 0 8px !important;
@@ -4549,7 +4563,7 @@ body.is-resizing-reference {
 
 @media (max-width: 720px) {
     #cluster-inspector .cluster-slot-row {
-        grid-template-columns: 42px 1fr 78px !important;
+        grid-template-columns: 42px 1fr 96px !important;
         grid-template-areas:
             "swatch name flags"
             "swatch friendly flags"
@@ -5231,4 +5245,109 @@ main.page-width {
     .export-actions #export-colors-zip-button {
         margin-left: 0;
     }
+}
+
+/* ============================================================
+   MOD ZIP EDITING TARGET PICKER
+   ============================================================ */
+
+.mod-target-dialog {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 32px));
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.mod-target-dialog::backdrop {
+    background: rgba(7, 9, 14, 0.78);
+    backdrop-filter: blur(5px);
+}
+
+.mod-target-dialog-card {
+    display: grid;
+    gap: 18px;
+    padding: 24px;
+}
+
+.mod-target-dialog-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.mod-target-dialog-heading h2,
+.mod-target-dialog-heading p {
+    margin: 0;
+}
+
+.mod-target-dialog-heading p {
+    margin-top: 6px;
+    color: var(--muted);
+}
+
+.mod-target-list {
+    display: grid;
+    gap: 18px;
+    overflow: auto;
+    max-height: min(570px, calc(100vh - 190px));
+    padding-right: 4px;
+}
+
+.mod-target-group {
+    display: grid;
+    gap: 8px;
+}
+
+.mod-target-group-title {
+    margin: 0;
+    color: var(--accent);
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.mod-target-option {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px 16px;
+    width: 100%;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel-soft);
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+}
+
+.mod-target-option:hover,
+.mod-target-option:focus-visible {
+    border-color: rgba(126, 167, 255, 0.55);
+    background: rgba(126, 167, 255, 0.1);
+    outline: none;
+}
+
+.mod-target-option-name {
+    font-weight: 750;
+}
+
+.mod-target-option-root {
+    grid-column: 1 / -1;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mod-target-option-count {
+    color: var(--muted-strong);
+    font-size: 0.82rem;
+    white-space: nowrap;
 }
