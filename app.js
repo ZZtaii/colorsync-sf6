@@ -68,6 +68,7 @@ import {
 import {
     cmdRgbaToRuntimeRgba,
 } from "./lib/sf6-color-space.js";
+import { normalizeCmdMaterialNames } from "./lib/cmd-material-names.js";
 
 
 // ============================================================
@@ -927,13 +928,15 @@ async function parseCmdEntry(fileEntry) {
     const originalBuffer = await fileEntry.file.arrayBuffer();
     const workingBuffer = originalBuffer.slice(0);
     try {
-        return {
+        const cmd = {
             file: fileEntry.file,
             metadata: fileEntry.metadata,
             originalBuffer,
             workingBuffer,
             ...inspectCmdBuffer(originalBuffer),
         };
+        normalizeCmdMaterialNames(cmd.colorClusters, cmd.metadata);
+        return cmd;
     } catch (error) {
         throw new Error(`Failed to parse ${fileEntry.file.name}: ${error.message || String(error)}`);
     }
@@ -3691,6 +3694,7 @@ function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappi
     let changed = false;
     for (const mapping of mappings) {
         const current = inspectCmdBuffer(buffer);
+        normalizeCmdMaterialNames(current.colorClusters, cmd.metadata);
         if (current.colorClusters.some(cluster => cluster.name === mapping.name)) continue;
         const sourceSlots = customMaterialInitialSlots(mapping, cmd);
         const colorCount = sourceSlots?.length || Math.max(...mapping.customizeColorIndexes, -1) + 1;
@@ -3717,6 +3721,7 @@ function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappi
         return cmd;
     }
     const parsed = inspectCmdBuffer(buffer);
+    normalizeCmdMaterialNames(parsed.colorClusters, cmd.metadata);
     cmd.preCustomMaterialBuffer = startingBuffer.slice(0);
     cmd.workingBuffer = buffer;
     cmd.semanticBaselineBuffer = buffer.slice(0);
@@ -3745,6 +3750,7 @@ async function addDiscoveredCustomMaterial(materialName, templateName, sourceMap
     const rebuiltEntries = [];
     for (const cmd of state.cmdEntries) {
         const current = inspectCmdBuffer(cmd.workingBuffer);
+        normalizeCmdMaterialNames(current.colorClusters, cmd.metadata);
         if (current.colorClusters.some(cluster => cluster.name === material.name)) {
             rebuiltEntries.push({ cmd, buffer: cmd.workingBuffer, parsed: current });
             continue;
@@ -3767,7 +3773,9 @@ async function addDiscoveredCustomMaterial(materialName, templateName, sourceMap
             colorCount,
         });
         initializeCustomMaterialSlots(buffer, nextMapping, cmd);
-        rebuiltEntries.push({ cmd, buffer, parsed: inspectCmdBuffer(buffer) });
+        const parsed = inspectCmdBuffer(buffer);
+        normalizeCmdMaterialNames(parsed.colorClusters, cmd.metadata);
+        rebuiltEntries.push({ cmd, buffer, parsed });
     }
 
     const nextMappings = state.customMaterialMappings.concat(nextMapping);
