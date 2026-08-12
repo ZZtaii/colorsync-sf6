@@ -287,6 +287,7 @@ const modDescriptionInput = document.querySelector("#mod-description");
 const modAuthorInput = document.querySelector("#mod-author");
 const zipFileNameInput = document.querySelector("#zip-file-name");
 const zipFileNameField = zipFileNameInput?.closest("label");
+const zipTargetReminder = document.querySelector("#zip-target-reminder");
 
 const screenshotDropZone = document.querySelector("#screenshot-drop-zone");
 const screenshotFileInput = document.querySelector("#screenshot-file");
@@ -1637,6 +1638,7 @@ async function handleModZip(file) {
             entries,
             selectedRoot,
             selectedTarget,
+            requiredTargetSelection: editableTargets.length > 1,
             modinfoPath,
             modinfoText,
             sourceName: file.name,
@@ -2846,6 +2848,7 @@ function updateExportButtons() {
 
 function updateZipFileNameField() {
     zipFileNameField?.classList.toggle("hidden", !state.importedMod);
+    zipTargetReminder?.classList.toggle("hidden", !state.importedMod?.requiredTargetSelection);
     exportColorsZipButton?.classList.toggle("hidden", !state.importedMod);
 }
 

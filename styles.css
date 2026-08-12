@@ -5351,3 +5351,12 @@ main.page-width {
     font-size: 0.82rem;
     white-space: nowrap;
 }
+
+.zip-target-reminder {
+    display: block;
+    margin-top: 7px;
+    color: var(--muted-strong);
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.4;
+}
