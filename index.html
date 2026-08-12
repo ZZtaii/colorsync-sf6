@@ -900,13 +900,23 @@
     <div id="reference-viewer" class="reference-viewer hidden" aria-label="Reference image viewer">
         <div id="reference-viewer-shell" class="reference-viewer-shell">
             <div id="reference-viewer-image-wrap" class="reference-viewer-image-wrap">
-                <img id="reference-viewer-image" class="reference-viewer-image" alt="">
+                <img id="reference-viewer-image" class="reference-viewer-image" alt="" referrerpolicy="no-referrer">
                 <span id="reference-viewer-count" class="reference-viewer-count" aria-label="Reference image position"></span>
 
                 <div class="reference-viewer-controls">
                     <button id="reference-viewer-minimize" type="button" class="reference-viewer-control" aria-label="Minimize reference viewer" title="Minimize">-</button>
                     <button id="reference-viewer-add" type="button" class="reference-viewer-control" aria-label="Add custom reference image" title="Add image">+</button>
+                    <button id="reference-viewer-add-url" type="button" class="reference-viewer-control" aria-label="Add reference image from URL" title="Add image URL"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 13.4a4 4 0 0 0 5.7 0l2.1-2.1a4 4 0 0 0-5.7-5.7l-1.2 1.2M13.4 10.6a4 4 0 0 0-5.7 0l-2.1 2.1a4 4 0 0 0 5.7 5.7l1.2-1.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
                 </div>
+
+                <form id="reference-viewer-url-form" class="reference-viewer-url-form hidden">
+                    <label for="reference-viewer-url-input">Image URL</label>
+                    <div class="reference-viewer-url-row">
+                        <input id="reference-viewer-url-input" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://.../image.png">
+                        <button id="reference-viewer-url-load" type="submit">Load</button>
+                    </div>
+                    <span id="reference-viewer-url-status" class="reference-viewer-url-status" role="status" aria-live="polite"></span>
+                </form>
 
                 <button id="reference-viewer-prev" type="button" class="reference-viewer-arrow reference-viewer-prev" aria-label="Previous reference image" title="Previous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 <button id="reference-viewer-next" type="button" class="reference-viewer-arrow reference-viewer-next" aria-label="Next reference image" title="Next"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 6.5L15 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>

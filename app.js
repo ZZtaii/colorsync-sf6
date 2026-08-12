@@ -308,6 +308,11 @@ const referenceViewerNext = document.querySelector("#reference-viewer-next");
 const referenceViewerMinimize = document.querySelector("#reference-viewer-minimize");
 const referenceViewerRestore = document.querySelector("#reference-viewer-restore");
 const referenceViewerAdd = document.querySelector("#reference-viewer-add");
+const referenceViewerAddUrl = document.querySelector("#reference-viewer-add-url");
+const referenceViewerUrlForm = document.querySelector("#reference-viewer-url-form");
+const referenceViewerUrlInput = document.querySelector("#reference-viewer-url-input");
+const referenceViewerUrlLoad = document.querySelector("#reference-viewer-url-load");
+const referenceViewerUrlStatus = document.querySelector("#reference-viewer-url-status");
 const referenceViewerResize = document.querySelector("#reference-viewer-resize");
 const referenceImageInput = document.querySelector("#reference-image-input");
 const parsedDataDetails = document.querySelector("#parsed-data-details");
@@ -3390,6 +3395,38 @@ function renderReferenceViewer() {
     if (referenceViewerNext) referenceViewerNext.disabled = false;
 }
 
+function closeReferenceUrlForm() {
+    referenceViewerUrlForm?.classList.add("hidden");
+    referenceViewerAddUrl?.setAttribute("aria-expanded", "false");
+    if (referenceViewerUrlStatus) {
+        referenceViewerUrlStatus.textContent = "";
+        referenceViewerUrlStatus.classList.remove("bad");
+    }
+}
+
+function remoteReferenceLabel(url) {
+    const filename = decodeURIComponent(url.pathname.split("/").pop() || "image");
+    return `Linked image: ${filename}`;
+}
+
+function loadRemoteReferenceImage(value) {
+    let url;
+    try {
+        url = new URL(String(value ?? "").trim());
+        if (url.protocol !== "https:" || url.username || url.password) throw new Error();
+    } catch {
+        return Promise.reject(new Error("Enter a direct HTTPS image URL."));
+    }
+
+    return new Promise((resolve, reject) => {
+        const probe = new Image();
+        probe.referrerPolicy = "no-referrer";
+        probe.onload = () => resolve(url);
+        probe.onerror = () => reject(new Error("That URL did not load as an image."));
+        probe.src = url.href;
+    });
+}
+
 function bindReferenceViewerResize() {
     if (!referenceViewerResize) return;
 
@@ -5314,6 +5351,59 @@ function bindUi() {
         renderReferenceViewer();
     });
     referenceViewerAdd?.addEventListener("click", () => referenceImageInput?.click());
+    referenceViewerAddUrl?.setAttribute("aria-expanded", "false");
+    referenceViewerAddUrl?.addEventListener("click", () => {
+        const opening = referenceViewerUrlForm?.classList.contains("hidden");
+        if (!opening) {
+            closeReferenceUrlForm();
+            return;
+        }
+        referenceViewerUrlForm?.classList.remove("hidden");
+        referenceViewerAddUrl.setAttribute("aria-expanded", "true");
+        referenceViewerUrlInput?.focus();
+    });
+    referenceViewerUrlForm?.addEventListener("submit", async event => {
+        event.preventDefault();
+        if (!referenceViewerUrlInput || !referenceViewerUrlLoad) return;
+        referenceViewerUrlLoad.disabled = true;
+        if (referenceViewerUrlStatus) {
+            referenceViewerUrlStatus.textContent = "Loading image...";
+            referenceViewerUrlStatus.classList.remove("bad");
+        }
+        try {
+            const url = await loadRemoteReferenceImage(referenceViewerUrlInput.value);
+            const existingIndex = state.referenceImages.findIndex(image => image.src === url.href);
+            if (existingIndex >= 0) {
+                state.referenceImageIndex = existingIndex;
+            } else {
+                state.referenceImages.push({
+                    src: url.href,
+                    label: remoteReferenceLabel(url),
+                    type: "remote",
+                });
+                state.referenceImageIndex = state.referenceImages.length - 1;
+            }
+            state.referenceMinimized = false;
+            saveUiState({ referenceMinimized: false });
+            referenceViewerUrlInput.value = "";
+            closeReferenceUrlForm();
+            renderReferenceViewer();
+        } catch (error) {
+            if (referenceViewerUrlStatus) {
+                referenceViewerUrlStatus.textContent = error.message || String(error);
+                referenceViewerUrlStatus.classList.add("bad");
+            }
+        } finally {
+            referenceViewerUrlLoad.disabled = false;
+        }
+    });
+    referenceViewerUrlInput?.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+            event.preventDefault();
+            closeReferenceUrlForm();
+            referenceViewerAddUrl?.focus();
+        }
+    });
     referenceImageInput?.addEventListener("change", async () => {
         const files = Array.from(referenceImageInput.files ?? []);
         for (const file of files) {
