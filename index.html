@@ -28,7 +28,8 @@
 
     <title>SF6 CMD Color Sync</title>
 
-    <link rel="icon" type="image/svg+xml" href="./data/favicon.svg">
+    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96.png">
+    <link rel="icon" type="image/svg+xml" sizes="any" href="./data/favicon.svg">
 
     <link
         rel="stylesheet"
@@ -38,12 +39,25 @@
     <script type="application/ld+json">
         {
             "@context": "https://schema.org",
-            "@type": "SoftwareApplication",
-            "name": "SF6 CMD Color Sync",
-            "applicationCategory": "UtilitiesApplication",
-            "operatingSystem": "Web browser",
-            "description": "A browser-based editor for Street Fighter 6 CMD palette files. Edit, synchronize, and export colors locally.",
-            "url": "https://colorsync-sf6.pages.dev/"
+            "@graph": [
+                {
+                    "@type": "WebSite",
+                    "name": "SF6 CMD Color Sync",
+                    "alternateName": [
+                        "SF6 Color Sync",
+                        "colorsync-sf6.pages.dev"
+                    ],
+                    "url": "https://colorsync-sf6.pages.dev/"
+                },
+                {
+                    "@type": "SoftwareApplication",
+                    "name": "SF6 CMD Color Sync",
+                    "applicationCategory": "UtilitiesApplication",
+                    "operatingSystem": "Web browser",
+                    "description": "A browser-based editor for Street Fighter 6 CMD palette files. Edit, synchronize, and export colors locally.",
+                    "url": "https://colorsync-sf6.pages.dev/"
+                }
+            ]
         }
     </script>
 </head>
