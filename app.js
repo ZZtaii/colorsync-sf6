@@ -11,6 +11,7 @@
 //   @anchor helpers
 //   @anchor cmd-validation
 //   @anchor parse-pipeline
+//   @anchor custom-materials
 //   @anchor buffer-mutation
 //   @anchor sync-engine
 //   @anchor changes-replace
@@ -28,6 +29,7 @@ import { unzip } from "./lib/fflate.js";
 import { createCompressedZip } from "./lib/zip-archive.js";
 import {
     colorsOnlyZipFilename,
+    discoverEditableCmdTargets,
     findOwningModinfoPath,
     nearestArchiveRoot,
     withOnlyColorsSuffix,
@@ -51,6 +53,8 @@ import {
     extractSf6ColorClusters,
     summarizeSf6ColorClusters,
 } from "./lib/sf6-colors.js";
+import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
+import { addCustomMaterialCluster } from "./lib/rsz-instance-writer.js";
 import {
     buildSf6ReferenceImages,
     validateReferenceImages,
@@ -110,7 +114,7 @@ const CMD_NAME_RE =
     /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex|dx)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
 const CMD_VARIANT_ORDER = { standard: 0, ex: 1, dx: 2 };
 const MAX_MOD_ZIP_BYTES = 200 * 1024 * 1024;
-const MAX_MOD_UNPACKED_BYTES = 300 * 1024 * 1024;
+const MAX_MOD_UNPACKED_BYTES = 750 * 1024 * 1024;
 
 
 // ============================================================
@@ -150,6 +154,8 @@ const state = {
     // export only changes the edited CMDs and modinfo.ini.
     importedMod: null,
     rememberedColorLibraryFile: null,
+    customMdfMaterials: [],
+    customMaterialMappings: [],
 
     syncMode: "color", // "color" | "pattern"
 
@@ -241,6 +247,9 @@ const clearCmdExportFolderBtn = document.querySelector("#clear-cmd-export-folder
 const chooseZipExportFolderBtn = document.querySelector("#choose-zip-export-folder");
 const clearZipExportFolderBtn = document.querySelector("#clear-zip-export-folder");
 const replaceDuplicateExportsInput = document.querySelector("#replace-duplicate-exports");
+const modTargetDialog = document.querySelector("#mod-target-dialog");
+const modTargetList = document.querySelector("#mod-target-list");
+const modTargetCancel = document.querySelector("#mod-target-cancel");
 
 const activeCmdSelect = document.querySelector("#active-cmd-select");
 const colorSyncActiveCmdSelect = document.querySelector("#color-sync-active-cmd");
@@ -366,6 +375,9 @@ function rgbaAtOffset(buffer, offset) {
 }
 
 function slotRgba(slot) {
+    if (slot?.enabled === false && Array.isArray(slot?.mdfFallbackRgba)) {
+        return slot.mdfFallbackRgba.slice();
+    }
     if (!slot?.color) return null;
     return [slot.color.r, slot.color.g, slot.color.b, slot.color.a];
 }
@@ -877,12 +889,9 @@ function checkSameCostume(entries) {
 // PARSE PIPELINE
 // ============================================================
 
-async function parseCmdEntry(fileEntry) {
-    const originalBuffer = await fileEntry.file.arrayBuffer();
-    const workingBuffer = originalBuffer.slice(0);
-
-    const usrInspection = inspectUsr(originalBuffer);
-    const rszInspection = inspectRsz(originalBuffer, usrInspection.header);
+function inspectCmdBuffer(buffer) {
+    const usrInspection = inspectUsr(buffer);
+    const rszInspection = inspectRsz(buffer, usrInspection.header);
 
     rszInspection.instanceInfos = resolveInstanceTypes(
         rszInspection.instanceInfos,
@@ -890,14 +899,14 @@ async function parseCmdEntry(fileEntry) {
     );
 
     const instanceParse = parseRszInstances(
-        originalBuffer,
+        buffer,
         rszInspection,
         typeRegistry,
     );
 
     if (instanceParse.status !== "complete") {
         throw new Error(
-            `Failed to parse ${fileEntry.file.name}: ${instanceParse.reason}`
+            `Failed to parse CMD data: ${instanceParse.reason}`
             + (instanceParse.error ? ` (${instanceParse.error})` : ""),
         );
     }
@@ -905,16 +914,28 @@ async function parseCmdEntry(fileEntry) {
     const colorClusters = extractSf6ColorClusters(instanceParse);
 
     return {
-        file: fileEntry.file,
-        metadata: fileEntry.metadata,
-        originalBuffer,
-        workingBuffer,
         usrInspection,
         rszInspection,
         instanceParse,
         colorClusters,
         summary: summarizeSf6ColorClusters(colorClusters),
     };
+}
+
+async function parseCmdEntry(fileEntry) {
+    const originalBuffer = await fileEntry.file.arrayBuffer();
+    const workingBuffer = originalBuffer.slice(0);
+    try {
+        return {
+            file: fileEntry.file,
+            metadata: fileEntry.metadata,
+            originalBuffer,
+            workingBuffer,
+            ...inspectCmdBuffer(originalBuffer),
+        };
+    } catch (error) {
+        throw new Error(`Failed to parse ${fileEntry.file.name}: ${error.message || String(error)}`);
+    }
 }
 
 function cmdIdentityKey(metadata) {
@@ -1239,6 +1260,243 @@ function parseStandardCmdFilename(filename) {
     return metadata?.variant === "standard" ? metadata : null;
 }
 
+function selectedTargetZipFilename(sourceName, target, entries) {
+    if (!target) return sourceName;
+    const base = String(sourceName || "SF6 Colors.zip").replace(/\.zip$/i, "");
+    const label = modTargetName(target, entries).replace(/[<>:"/\\|?*]+/g, "_").trim();
+    return `${base} - ${label}.zip`;
+}
+
+function modTargetName(target, entries) {
+    const text = target.modinfoPath ? new TextDecoder().decode(entries[target.modinfoPath]) : "";
+    const rootName = target.root.replace(/\/$/, "").split("/").pop();
+    return parseModinfoValue(text, "name") || rootName || `${SF6_CHARACTERS[target.esfId] || target.esfId} C${Number(target.costumeFolder)}`;
+}
+
+function chooseEditableCmdTarget(targets, entries) {
+    if (targets.length <= 1 || !modTargetDialog || !modTargetList) {
+        return Promise.resolve(targets[0] || null);
+    }
+    modTargetList.innerHTML = "";
+    const grouped = new Map();
+    for (const target of targets) {
+        const key = `${target.esfId}|${target.costumeFolder}`;
+        const group = grouped.get(key) || [];
+        group.push(target);
+        grouped.set(key, group);
+    }
+    for (const group of grouped.values()) {
+        const target = group[0];
+        const section = document.createElement("section");
+        section.className = "mod-target-group";
+        const heading = document.createElement("h3");
+        heading.className = "mod-target-group-title";
+        heading.textContent = `${SF6_CHARACTERS[target.esfId] || target.esfId} · C${Number(target.costumeFolder)}`;
+        section.appendChild(heading);
+        for (const option of group) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "mod-target-option";
+            const name = document.createElement("span");
+            name.className = "mod-target-option-name";
+            name.textContent = modTargetName(option, entries);
+            const count = document.createElement("span");
+            count.className = "mod-target-option-count";
+            count.textContent = `${option.cmdPaths.length} CMD${option.cmdPaths.length === 1 ? "" : "s"}`;
+            const root = document.createElement("span");
+            root.className = "mod-target-option-root";
+            root.textContent = option.root.replace(/\/$/, "") || "ZIP root";
+            button.append(name, count, root);
+            button.addEventListener("click", () => modTargetDialog.close(option.root));
+            section.appendChild(button);
+        }
+        modTargetList.appendChild(section);
+    }
+    return new Promise(resolve => {
+        const close = () => {
+            modTargetDialog.removeEventListener("close", close);
+            resolve(targets.find(target => target.root === modTargetDialog.returnValue) || null);
+        };
+        modTargetDialog.addEventListener("close", close);
+        modTargetDialog.returnValue = "";
+        modTargetDialog.showModal();
+        modTargetList.querySelector(".mod-target-option")?.focus();
+    });
+}
+
+// ============================================================
+// @anchor custom-materials
+// MDF MATERIAL DISCOVERY + TARGETED CMD CLUSTER REBUILD
+// ============================================================
+
+function discoverMdfColorMaterials(entries, { esfId, costumeFolder } = {}) {
+    if (!entries || !esfId || !costumeFolder) return [];
+    const materialMap = new Map();
+    const sourceFolders = costumeFolder === "000"
+        ? "000"
+        : `(?:${costumeFolder}|000)`;
+    const modelPathRe = new RegExp(
+        `(?:^|/)natives/stm/(?:streaming/)?product/model/esf/${esfId}/${sourceFolders}/`,
+        "i",
+    );
+    const selectedRoot = state.importedMod?.selectedRoot;
+
+    for (const [path, bytes] of Object.entries(entries)) {
+        if (selectedRoot != null && !path.startsWith(selectedRoot)) continue;
+        if (!modelPathRe.test(path) || !/\.mdf2\.\d+$/i.test(path)) continue;
+        try {
+            const buffer = bytes.buffer.slice(
+                bytes.byteOffset,
+                bytes.byteOffset + bytes.byteLength,
+            );
+            for (const material of parseMdfMaterialNames(buffer, zipEntryBaseName(path))) {
+                if (!material.name || !material.customizeColorIndexes.length) continue;
+                const current = materialMap.get(material.name) ?? {
+                    name: material.name,
+                    customizeColorIndexes: new Set(),
+                    paths: [],
+                    defaultVariants: [],
+                };
+                material.customizeColorIndexes.forEach(index => current.customizeColorIndexes.add(index));
+                current.paths.push(path);
+                const defaultVariant = {
+                    path,
+                    materialIndex: material.materialIndex,
+                    customizeColors: material.customizeColors.map(color => ({
+                        index: color.index,
+                        linearRgba: color.linearRgba.slice(),
+                        cmdRgba: color.cmdRgba.slice(),
+                    })),
+                };
+                const signature = JSON.stringify(defaultVariant.customizeColors.map(color => [color.index, color.cmdRgba]));
+                if (!current.defaultVariants.some(variant => variant.signature === signature)) {
+                    current.defaultVariants.push({ ...defaultVariant, signature });
+                }
+                materialMap.set(material.name, current);
+            }
+        } catch (error) {
+            console.warn(`Could not inspect MDF materials in ${path}:`, error);
+        }
+    }
+
+    return [...materialMap.values()]
+        .map(material => ({
+            ...material,
+            customizeColorIndexes: [...material.customizeColorIndexes].sort((a, b) => a - b),
+            defaultVariants: material.defaultVariants.map(({ signature, ...variant }) => variant),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function resolveExternalCustomMaterialSources(libraryEntries, target) {
+    if (!libraryEntries || !target || !state.cmdEntries.length) return {};
+    const materials = discoverMdfColorMaterials(state.importedMod?.entries, target)
+        .filter(material => !state.cmdEntries.every(cmd => (
+            cmd.colorClusters.some(cluster => cluster.name === material.name)
+        )));
+    if (!materials.length) return {};
+
+    const wantedNames = new Set(materials.map(material => material.name));
+    const palettes = new Set(state.cmdEntries
+        .filter(cmd => cmd.metadata.variant === "standard")
+        .map(cmd => cmd.metadata.paletteNumber));
+    const byCostume = new Map();
+    for (const [path, bytes] of Object.entries(libraryEntries)) {
+        const metadata = parseStandardCmdFilename(zipEntryBaseName(path));
+        if (
+            !metadata
+            || metadata.esfId !== target.esfId
+            || metadata.costumeFolder === target.costumeFolder
+            || !palettes.has(metadata.paletteNumber)
+        ) continue;
+        try {
+            const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            const matches = inspectCmdBuffer(buffer).colorClusters
+                .filter(cluster => wantedNames.has(cluster.name));
+            if (!matches.length) continue;
+            const costume = byCostume.get(metadata.costumeFolder) || new Map();
+            costume.set(metadata.paletteNumber, matches);
+            byCostume.set(metadata.costumeFolder, costume);
+        } catch (error) {
+            console.warn(`Could not inspect material sources in ${path}:`, error);
+        }
+    }
+
+    const resolved = {};
+    for (const material of materials) {
+        const candidates = [...byCostume].flatMap(([costumeFolder, costumePalettes]) => {
+            const paletteSlots = {};
+            for (const palette of palettes) {
+                const cluster = costumePalettes.get(palette)?.find(candidate => candidate.name === material.name);
+                if (!cluster) continue;
+                paletteSlots[palette] = cluster.colors.map(slot => ({
+                    rgba: [slot.color.r, slot.color.g, slot.color.b, slot.color.a],
+                    enabled: Boolean(slot.enabled),
+                }));
+            }
+            return [{ costumeFolder, paletteSlots, coverage: Object.keys(paletteSlots).length }];
+        }).filter(candidate => candidate.coverage > 0)
+            .sort((left, right) => right.coverage - left.coverage || left.costumeFolder.localeCompare(right.costumeFolder));
+        if (!candidates.length) continue;
+        const best = candidates[0];
+        const tied = candidates.filter(candidate => candidate.coverage === best.coverage);
+        if (best.coverage !== palettes.size || tied.length !== 1) continue;
+        resolved[material.name] = {
+            sourceCostumeFolder: best.costumeFolder,
+            paletteSlots: best.paletteSlots,
+        };
+    }
+    return resolved;
+}
+
+async function refreshDiscoveredCustomMaterials() {
+    const target = state.cmdEntries[0]?.metadata;
+    state.customMdfMaterials = discoverMdfColorMaterials(
+        state.importedMod?.entries,
+        target,
+    );
+    for (const material of state.customMdfMaterials) {
+        const existsEverywhere = state.cmdEntries.every(cmd => (
+            cmd.colorClusters.some(cluster => cluster.name === material.name)
+        ));
+        if (existsEverywhere) continue;
+        const templateName = automaticCustomMaterialTemplateName(material);
+        if (!templateName) {
+            throw new Error(`Cannot add MDF material ${material.name}: no compatible CMD color-slot structure exists in every palette.`);
+        }
+        await addDiscoveredCustomMaterial(
+            material.name,
+            templateName,
+            state.importedMod?.externalCustomMaterialSources?.[material.name],
+        );
+    }
+    attachMdfFallbackColorsToCmdEntries();
+    state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? [];
+    renderColorClusters(state.colorClusters);
+    renderSyncPanels();
+}
+
+function attachMdfFallbackColorsToCmdEntries() {
+    const materials = new Map(state.customMdfMaterials.map(material => [material.name, material]));
+    for (const cmd of state.cmdEntries) {
+        const occurrences = new Map();
+        for (const cluster of cmd.colorClusters) {
+            const material = materials.get(cluster.name);
+            if (!material?.defaultVariants?.length) continue;
+            const occurrence = occurrences.get(cluster.name) || 0;
+            occurrences.set(cluster.name, occurrence + 1);
+            const variant = material.defaultVariants[occurrence] || material.defaultVariants[0];
+            for (const slot of cluster.colors) {
+                const fallback = variant.customizeColors.find(color => color.index === slot.index);
+                if (!fallback) continue;
+                slot.mdfFallbackRgba = fallback.cmdRgba.slice();
+                slot.mdfFallbackLinearRgba = fallback.linearRgba.slice();
+                slot.mdfFallbackPath = variant.path;
+            }
+        }
+    }
+}
+
 function resetLoadedCmdState() {
     state.files = [];
     state.rejectedFiles = [];
@@ -1251,6 +1509,8 @@ function resetLoadedCmdState() {
     state.detectedEsfId = null;
     state.detectedCharacterName = null;
     state.detectedCostume = null;
+    state.customMdfMaterials = [];
+    state.customMaterialMappings = [];
 }
 
 function clearScreenshot() {
@@ -1288,17 +1548,34 @@ async function handleModZip(file) {
         const entries = await unzipArchive(new Uint8Array(zipData));
         const unpackedBytes = Object.values(entries).reduce((total, bytes) => total + bytes.byteLength, 0);
         if (unpackedBytes > MAX_MOD_UNPACKED_BYTES) {
-            throw new Error("Mod ZIP expands beyond the 300 MiB safety limit.");
+            throw new Error("Mod ZIP expands beyond the 750 MiB safety limit.");
         }
 
         const paths = Object.keys(entries).filter(path => !path.endsWith("/"));
         // Backups contain valid CMD filenames too, but they are restore sources,
         // never live mod files to load into the editor automatically.
         const livePaths = paths.filter(path => !isColorBackupPath(path));
-        const standardCmdPaths = livePaths.filter(path =>
+        // Palette 000 is an empty/internal palette in mod ZIPs and produces an
+        // unhelpful non-editable entry. Preserve it in the archive, but do not
+        // expose it to ZIP target discovery or the editor. Direct CMD uploads
+        // intentionally retain their existing inspection behavior.
+        const zipEditablePaths = livePaths.filter(path => {
+            const metadata = parseStandardCmdFilename(zipEntryBaseName(path));
+            return !metadata || metadata.paletteNumber !== 0;
+        });
+        const allStandardCmdPaths = zipEditablePaths.filter(path =>
             parseStandardCmdFilename(zipEntryBaseName(path)),
         );
+        const modinfoPaths = paths.filter(path => zipEntryBaseName(path).toLowerCase() === "modinfo.ini");
+        const editableTargets = discoverEditableCmdTargets(zipEditablePaths, modinfoPaths, parseCmdFilename);
+        const selectedTarget = await chooseEditableCmdTarget(editableTargets, entries);
+        if (editableTargets.length && !selectedTarget) {
+            throw new DOMException("Mod target selection was cancelled.", "AbortError");
+        }
+        const standardCmdPaths = selectedTarget?.cmdPaths || allStandardCmdPaths;
+        const selectedRoot = selectedTarget?.root ?? null;
         const ignoredVariantCount = livePaths.filter(path => {
+            if (selectedRoot != null && !path.startsWith(selectedRoot)) return false;
             const metadata = parseCmdFilename(zipEntryBaseName(path));
             return metadata && metadata.variant !== "standard";
         }).length;
@@ -1307,11 +1584,11 @@ async function handleModZip(file) {
 
         // Some mod managers ZIP the mod contents directly, while others include
         // one enclosing folder. Accept either layout and preserve it verbatim.
-        const modinfoPaths = paths.filter(path => zipEntryBaseName(path).toLowerCase() === "modinfo.ini");
         // Bundles commonly contain sibling Hair and Outfit submods. CMD files
         // belong to the nearest enclosing modinfo.ini, not whichever metadata
         // file happened to appear first in ZIP order.
-        const modinfoPath = findOwningModinfoPath(standardCmdPaths, modinfoPaths)
+        const modinfoPath = selectedTarget?.modinfoPath
+            || findOwningModinfoPath(standardCmdPaths, modinfoPaths)
             || modinfoPaths[0]
             || null;
         const modinfoText = modinfoPath ? new TextDecoder().decode(entries[modinfoPath]) : "";
@@ -1358,6 +1635,8 @@ async function handleModZip(file) {
         clearScreenshot();
         state.importedMod = {
             entries,
+            selectedRoot,
+            selectedTarget,
             modinfoPath,
             modinfoText,
             sourceName: file.name,
@@ -1371,7 +1650,14 @@ async function handleModZip(file) {
             modinfoByRoot: Object.fromEntries(modinfoPaths.map(path => [zipEntryDirectory(path), path])),
             colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
         };
-        setImportedModMetadata(modinfoText, file.name);
+        state.customMaterialMappings = state.importedMod.colorBackupManifest.customMaterials
+            .map(mapping => ({ ...mapping, customizeColorIndexes: mapping.customizeColorIndexes.slice() }));
+        setImportedModMetadata(
+            modinfoText,
+            editableTargets.length > 1
+                ? selectedTargetZipFilename(file.name, selectedTarget, entries)
+                : file.name,
+        );
         if (screenshotPath) {
             setScreenshot(
                 new File([entries[screenshotPath]], zipEntryBaseName(screenshotPath), { type: imageMimeType(screenshotPath) }),
@@ -1383,10 +1669,15 @@ async function handleModZip(file) {
         state.cmdEntries.forEach(cmd => {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
         });
+        await refreshDiscoveredCustomMaterials();
         const loadedMeta = state.cmdEntries[0]?.metadata;
+        const targetLivePaths = selectedRoot == null
+            ? livePaths
+            : livePaths.filter(path => path.startsWith(selectedRoot));
+        const targetModinfoPaths = selectedTarget?.modinfoPath ? [selectedTarget.modinfoPath] : modinfoPaths;
         const detectedTarget = detectCmdPaletteTarget(
-            livePaths,
-            paths.filter(path => zipEntryBaseName(path).toLowerCase() === "modinfo.ini"),
+            targetLivePaths,
+            targetModinfoPaths,
         ).find(target => (
             target.esfId === loadedMeta?.esfId
             && target.costumeFolder === loadedMeta?.costumeFolder
@@ -1417,7 +1708,7 @@ async function handleModZip(file) {
         showStatus(
             parserStatus,
             "good",
-            `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from “${file.name}”.`
+            `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from ${modTargetName(selectedTarget || { root: modRoot, modinfoPath }, entries)}.`
             + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
             + " Other mod files will be preserved on ZIP export.",
         );
@@ -1487,6 +1778,11 @@ async function loadCmdsFromColorLibrary(file) {
         state.cmdEntries.forEach(cmd => {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
         });
+        state.importedMod.externalCustomMaterialSources = resolveExternalCustomMaterialSources(
+            libraryEntries,
+            target,
+        );
+        await refreshDiscoveredCustomMaterials();
         const stillMissing = missingPaletteNumbers(target);
         if (stillMissing.length) {
             if (colorLibraryHeading) colorLibraryHeading.textContent = `This mod includes ${10 - stillMissing.length} of 10 CMD palette files.`;
@@ -1622,7 +1918,7 @@ async function handleFiles(fileCollection) {
 
     const newlyParsed = [];
     for (const entry of toAdd) {
-        newlyParsed.push(await parseCmdEntry(entry));
+        newlyParsed.push(applyCustomMappingsToCmdEntry(await parseCmdEntry(entry)));
     }
 
     // Keep existing working buffers / edits; only append new CMDs.
@@ -2049,13 +2345,14 @@ function getCurrentColorChanges() {
 
     state.cmdEntries.forEach((cmd, cmdIndex) => {
         const changes = [];
+        const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
 
         for (const cluster of cmd.colorClusters) {
             for (const color of cluster.colors) {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
 
-                const beforeRgba = rgbaAtOffset(cmd.originalBuffer, offset);
+                const beforeRgba = rgbaAtOffset(baseline, offset);
                 const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
                 if (rgbaEquals(beforeRgba, afterRgba)) continue;
 
@@ -2091,7 +2388,7 @@ function revertChange(cmdIndex, offset) {
     const cmd = state.cmdEntries[cmdIndex];
     if (!cmd) return;
 
-    const original = rgbaAtOffset(cmd.originalBuffer, offset);
+    const original = rgbaAtOffset(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, offset);
     writeRgbaAtOffset(cmd.workingBuffer, offset, original);
     updateColorModelAtOffset(cmd, offset, original);
 
@@ -2362,17 +2659,18 @@ function bindReplaceColorUi() {
 
 function revertAllChanges() {
     for (const cmd of state.cmdEntries) {
+        const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
         const working = new Uint8Array(cmd.workingBuffer);
-        working.set(new Uint8Array(cmd.originalBuffer));
+        working.set(new Uint8Array(baseline));
 
         for (const cluster of cmd.colorClusters) {
             for (const color of cluster.colors) {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
-                const rgba = rgbaAtOffset(cmd.originalBuffer, offset);
+                const rgba = rgbaAtOffset(baseline, offset);
                 updateColorModelAtOffset(cmd, offset, rgba);
                 const enabled = enabledAtOffset(
-                    cmd.originalBuffer,
+                    baseline,
                     color.enable?.absoluteOffset,
                     color.enable?.byteLength,
                 );
@@ -2485,7 +2783,7 @@ function diffBuffers(original, working) {
     const a = new Uint8Array(original);
     const b = new Uint8Array(working);
     const diff = [];
-    for (let i = 0; i < a.length; i += 1) {
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
         if (a[i] !== b[i]) {
             diff.push({ offset: i, before: a[i], after: b[i] });
         }
@@ -2509,12 +2807,15 @@ function enabledAtOffset(buffer, offset, byteLength = 1) {
 
 function semanticChangesSince(cmd, baseline) {
     const changes = [];
+    const colorBaseline = baseline.byteLength === cmd.workingBuffer.byteLength
+        ? baseline
+        : (cmd.semanticBaselineBuffer ?? baseline);
     for (const cluster of cmd.colorClusters) for (const slot of cluster.colors) {
         const offset = slot.color?.absoluteOffset;
         if (!Number.isInteger(offset)) continue;
-        const beforeRgba = rgbaAtOffset(baseline, offset);
+        const beforeRgba = rgbaAtOffset(colorBaseline, offset);
         const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
-        const beforeEnabled = enabledAtOffset(baseline, slot.enable?.absoluteOffset, slot.enable?.byteLength);
+        const beforeEnabled = enabledAtOffset(colorBaseline, slot.enable?.absoluteOffset, slot.enable?.byteLength);
         const afterEnabled = enabledAtOffset(cmd.workingBuffer, slot.enable?.absoluteOffset, slot.enable?.byteLength);
         if (!rgbaEquals(beforeRgba, afterRgba) || beforeEnabled !== afterEnabled) {
             changes.push({ cluster: cluster.name, slot: slot.runtimeName, beforeRgba, afterRgba, beforeEnabled, afterEnabled });
@@ -2656,6 +2957,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
             manifest: state.importedMod?.colorBackupManifest || emptyColorBackupManifest(),
             originalSources,
             historySources,
+            customMaterials: state.customMaterialMappings,
             changelogBytes: historySources.length ? buildExportChangelog(changedCmds) : null,
             createdAt,
         });
@@ -3249,6 +3551,245 @@ function renderColorBackupPanel() {
     }
 }
 
+function customMaterialTemplateNames(material) {
+    const requiredIndex = Math.max(...material.customizeColorIndexes, -1);
+    const firstCmd = state.cmdEntries[0];
+    if (!firstCmd) return [];
+    const names = [];
+    const seen = new Set();
+    const discoveredNames = new Set([
+        ...state.customMaterialMappings.map(mapping => mapping.name),
+        ...state.customMdfMaterials
+            .filter(candidate => !state.cmdEntries.every(cmd => (
+                cmd.colorClusters.some(cluster => cluster.name === candidate.name)
+            )))
+            .map(candidate => candidate.name),
+    ]);
+    for (const cluster of firstCmd.colorClusters) {
+        if (
+            !cluster.name
+            || cluster.name === material.name
+            || discoveredNames.has(cluster.name)
+            || seen.has(cluster.name)
+            || cluster.colors.length <= requiredIndex
+        ) continue;
+        const availableEverywhere = state.cmdEntries.every(cmd => (
+            cmd.colorClusters.some(candidate => (
+                candidate.name === cluster.name
+                && candidate.colors.length > requiredIndex
+            ))
+        ));
+        if (!availableEverywhere) continue;
+        seen.add(cluster.name);
+        names.push(cluster.name);
+    }
+    return names;
+}
+
+function orderAutoInsertedMaterials(clusters, mappings = state.customMaterialMappings) {
+    if (!Array.isArray(clusters) || !mappings.length) return clusters;
+    const order = new Map(mappings.map((mapping, index) => [mapping.name.toLowerCase(), index]));
+    const inserted = [];
+    const regular = [];
+    for (const cluster of clusters) {
+        if (order.has(String(cluster.name || "").toLowerCase())) inserted.push(cluster);
+        else regular.push(cluster);
+    }
+    if (!inserted.length) return clusters;
+    inserted.sort((left, right) => (
+        order.get(left.name.toLowerCase()) - order.get(right.name.toLowerCase())
+    ));
+    return inserted.concat(regular);
+}
+
+function automaticCustomMaterialTemplateName(material) {
+    const candidates = customMaterialTemplateNames(material);
+    if (!candidates.length) return "";
+    const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
+    const targetParts = material.name.toLowerCase().split("_");
+    const targetFamily = targetParts.slice(0, 2).join("_");
+    const targetAlpha = targetParts.includes("alpha");
+    const commonPrefixLength = name => {
+        const left = material.name.toLowerCase();
+        const right = name.toLowerCase();
+        let length = 0;
+        while (length < left.length && length < right.length && left[length] === right[length]) length += 1;
+        return length;
+    };
+    const score = name => {
+        const parts = name.toLowerCase().split("_");
+        const familyMatch = parts.slice(0, 2).join("_") === targetFamily ? 1 : 0;
+        const alphaMatch = parts.includes("alpha") === targetAlpha ? 1 : 0;
+        const extraSlots = state.cmdEntries.reduce((total, cmd) => {
+            const cluster = cmd.colorClusters.find(candidate => candidate.name === name);
+            return total + Math.max(0, (cluster?.colors.length ?? requiredCount) - requiredCount);
+        }, 0);
+        return { familyMatch, alphaMatch, extraSlots, prefix: commonPrefixLength(name) };
+    };
+    return candidates.slice().sort((left, right) => {
+        const a = score(left);
+        const b = score(right);
+        return b.familyMatch - a.familyMatch
+            || b.alphaMatch - a.alphaMatch
+            || a.extraSlots - b.extraSlots
+            || b.prefix - a.prefix
+            || left.localeCompare(right);
+    })[0];
+}
+
+function customMaterialPaletteSlots(mapping, cmd) {
+    return mapping?.paletteSlots?.[String(cmd?.metadata?.paletteNumber)] || null;
+}
+
+function customMaterialMdfDefaultSlots(mapping) {
+    const material = state.customMdfMaterials.find(candidate => candidate.name === mapping?.name);
+    const variant = material?.defaultVariants?.[0];
+    if (!variant?.customizeColors?.length) return null;
+    const byIndex = new Map(variant.customizeColors.map(color => [color.index, color]));
+    const colorCount = Math.max(...mapping.customizeColorIndexes, -1) + 1;
+    return Array.from({ length: colorCount }, (_, index) => {
+        const fallback = byIndex.get(index);
+        return fallback ? { rgba: fallback.cmdRgba.slice(), enabled: false } : null;
+    });
+}
+
+function customMaterialInitialSlots(mapping, cmd) {
+    return customMaterialPaletteSlots(mapping, cmd) || customMaterialMdfDefaultSlots(mapping);
+}
+
+function initializeCustomMaterialSlots(buffer, mapping, cmd) {
+    const sourceSlots = customMaterialInitialSlots(mapping, cmd);
+    if (!sourceSlots?.length) return buffer;
+    const current = inspectCmdBuffer(buffer);
+    const cluster = current.colorClusters.find(candidate => candidate.name === mapping.name);
+    if (!cluster || cluster.colors.length !== sourceSlots.length) {
+        throw new Error(`${cmdDisplayName(cmd)} could not initialize ${mapping.name} from its source colors.`);
+    }
+    sourceSlots.forEach((source, index) => {
+        if (!source) return;
+        const target = cluster.colors[index];
+        writeRgbaAtOffset(buffer, target.color.absoluteOffset, source.rgba);
+        if (Number.isInteger(target.enable?.absoluteOffset)) {
+            writeEnableAtOffset(buffer, target.enable.absoluteOffset, target.enable.byteLength, source.enabled);
+        }
+    });
+    return buffer;
+}
+
+function hasPendingColorEdits(cmd) {
+    const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+    return diffBuffers(baseline, cmd.workingBuffer).length > 0;
+}
+
+function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappings) {
+    if (!mappings.length) return cmd;
+    const startingBuffer = cmd.workingBuffer;
+    let buffer = startingBuffer;
+    let changed = false;
+    for (const mapping of mappings) {
+        const current = inspectCmdBuffer(buffer);
+        if (current.colorClusters.some(cluster => cluster.name === mapping.name)) continue;
+        const sourceSlots = customMaterialInitialSlots(mapping, cmd);
+        const colorCount = sourceSlots?.length || Math.max(...mapping.customizeColorIndexes, -1) + 1;
+        const template = current.colorClusters.find(cluster => (
+            cluster.name === mapping.templateName
+            && cluster.colors.length >= colorCount
+        ));
+        if (!template) {
+            throw new Error(`${cmdDisplayName(cmd)} does not contain a compatible ${mapping.templateName} template.`);
+        }
+        buffer = addCustomMaterialCluster({
+            buffer,
+            ...current,
+            typeRegistry,
+            templateClusterInstanceId: template.instanceId,
+            materialName: mapping.name,
+            colorCount,
+        });
+        buffer = initializeCustomMaterialSlots(buffer, mapping, cmd);
+        changed = true;
+    }
+    if (!changed) {
+        cmd.colorClusters = orderAutoInsertedMaterials(cmd.colorClusters, mappings);
+        return cmd;
+    }
+    const parsed = inspectCmdBuffer(buffer);
+    cmd.preCustomMaterialBuffer = startingBuffer.slice(0);
+    cmd.workingBuffer = buffer;
+    cmd.semanticBaselineBuffer = buffer.slice(0);
+    cmd.usrInspection = parsed.usrInspection;
+    cmd.rszInspection = parsed.rszInspection;
+    cmd.instanceParse = parsed.instanceParse;
+    cmd.colorClusters = orderAutoInsertedMaterials(parsed.colorClusters, mappings);
+    cmd.summary = parsed.summary;
+    return cmd;
+}
+
+async function addDiscoveredCustomMaterial(materialName, templateName, sourceMapping = {}) {
+    const material = state.customMdfMaterials.find(candidate => candidate.name === materialName);
+    if (!material) throw new Error("Custom MDF material is no longer available.");
+    if (!templateName) throw new Error("No compatible CMD color-slot structure was found.");
+    if (state.cmdEntries.some(hasPendingColorEdits)) {
+        throw new Error("Add custom materials before editing colors. Reload the mod ZIP to change the material structure after color edits.");
+    }
+
+    const nextMapping = {
+        name: material.name,
+        templateName,
+        customizeColorIndexes: material.customizeColorIndexes.slice(),
+        ...sourceMapping,
+    };
+    const rebuiltEntries = [];
+    for (const cmd of state.cmdEntries) {
+        const current = inspectCmdBuffer(cmd.workingBuffer);
+        if (current.colorClusters.some(cluster => cluster.name === material.name)) {
+            rebuiltEntries.push({ cmd, buffer: cmd.workingBuffer, parsed: current });
+            continue;
+        }
+        const sourceSlots = customMaterialInitialSlots(nextMapping, cmd);
+        const colorCount = sourceSlots?.length || Math.max(...material.customizeColorIndexes, -1) + 1;
+        const template = current.colorClusters.find(cluster => (
+            cluster.name === templateName
+            && cluster.colors.length >= colorCount
+        ));
+        if (!template) {
+            throw new Error(`${cmdDisplayName(cmd)} does not contain a compatible ${templateName} template.`);
+        }
+        const buffer = addCustomMaterialCluster({
+            buffer: cmd.workingBuffer,
+            ...current,
+            typeRegistry,
+            templateClusterInstanceId: template.instanceId,
+            materialName: material.name,
+            colorCount,
+        });
+        initializeCustomMaterialSlots(buffer, nextMapping, cmd);
+        rebuiltEntries.push({ cmd, buffer, parsed: inspectCmdBuffer(buffer) });
+    }
+
+    const nextMappings = state.customMaterialMappings.concat(nextMapping);
+    for (const { cmd, buffer, parsed } of rebuiltEntries) {
+        if (!cmd.preCustomMaterialBuffer) {
+            cmd.preCustomMaterialBuffer = cmd.workingBuffer.slice(0);
+        }
+        cmd.workingBuffer = buffer;
+        cmd.semanticBaselineBuffer = buffer.slice(0);
+        cmd.usrInspection = parsed.usrInspection;
+        cmd.rszInspection = parsed.rszInspection;
+        cmd.instanceParse = parsed.instanceParse;
+        cmd.colorClusters = orderAutoInsertedMaterials(parsed.colorClusters, nextMappings);
+        cmd.summary = parsed.summary;
+    }
+    state.customMaterialMappings = nextMappings;
+    state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? [];
+    state.surpriseSnapshots.clear();
+    resetSyncSelections();
+    renderColorClusters(state.colorClusters);
+    renderSyncPanels();
+    renderCurrentChanges();
+    updateExportButtons();
+}
+
 async function restoreColorBackup(snapshotId) {
     const snapshot = state.importedMod?.colorBackupManifest?.snapshots?.find(item => item.id === snapshotId);
     if (!snapshot) throw new Error("That color backup is no longer available.");
@@ -3262,15 +3803,18 @@ async function restoreColorBackup(snapshotId) {
     );
     if (!accepted) return false;
     if (typeRegistry === null) typeRegistry = await loadSf6TypeRegistry();
+    const restoreMappings = state.customMaterialMappings.length
+        ? state.customMaterialMappings
+        : (state.importedMod?.colorBackupManifest?.customMaterials || []);
 
     const parsedTargets = await Promise.all(targets.map(async target => {
         const backupPath = safeArchiveRelativePath(target.backupPath);
         const bytes = state.importedMod.entries[backupPath];
         if (!bytes) throw new Error(`Backup file is missing: ${target.backupPath}`);
-        const restored = await parseCmdEntry({
+        const restored = applyCustomMappingsToCmdEntry(await parseCmdEntry({
             file: new File([bytes], target.cmd.file.name, { type: "application/octet-stream" }),
             metadata: target.cmd.metadata,
-        });
+        }), restoreMappings);
         return { target, restored };
     }));
 
@@ -3281,6 +3825,23 @@ async function restoreColorBackup(snapshotId) {
         target.cmd.instanceParse = restored.instanceParse;
         target.cmd.colorClusters = restored.colorClusters;
         target.cmd.summary = restored.summary;
+        if (restoreMappings.length) {
+            const originalStructure = applyCustomMappingsToCmdEntry({
+                file: target.cmd.file,
+                metadata: target.cmd.metadata,
+                originalBuffer: target.cmd.originalBuffer,
+                workingBuffer: target.cmd.originalBuffer.slice(0),
+                ...inspectCmdBuffer(target.cmd.originalBuffer),
+            }, restoreMappings);
+            target.cmd.semanticBaselineBuffer = originalStructure.workingBuffer.slice(0);
+        } else {
+            delete target.cmd.semanticBaselineBuffer;
+        }
+        if (restored.preCustomMaterialBuffer) {
+            target.cmd.preCustomMaterialBuffer = restored.preCustomMaterialBuffer;
+        } else {
+            delete target.cmd.preCustomMaterialBuffer;
+        }
     }
 
     state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters || [];
@@ -3312,6 +3873,8 @@ async function unloadCmd(index) {
         state.detectedCharacterName = null;
         state.detectedCostume = null;
         state.importedMod = null;
+        state.customMdfMaterials = [];
+        state.customMaterialMappings = [];
         clearReferenceImages();
         clearScreenshot();
         if (zipFileNameInput) zipFileNameInput.value = "";
@@ -3517,9 +4080,29 @@ function renderColorClusters(clusters) {
     if (!clusterInspector) return;
     clusterInspector.innerHTML = "";
 
-    for (const cluster of clusters ?? []) {
+    const customNames = new Set(
+        state.customMaterialMappings.map(mapping => mapping.name.toLowerCase()),
+    );
+    const renderedClusters = orderAutoInsertedMaterials(clusters ?? []);
+    const hasCustom = renderedClusters.some(cluster => (
+        customNames.has(String(cluster.name || "").toLowerCase())
+    ));
+    let currentGroup = null;
+
+    for (const cluster of renderedClusters) {
+        const group = customNames.has(String(cluster.name || "").toLowerCase())
+            ? "custom"
+            : "standard";
+        if (hasCustom && group !== currentGroup) {
+            const heading = document.createElement("h4");
+            heading.className = `cluster-group-heading is-${group}`;
+            heading.textContent = group === "custom" ? "Custom MDF materials" : "CMD materials";
+            clusterInspector.appendChild(heading);
+            currentGroup = group;
+        }
         const card = document.createElement("details");
         card.className = "cluster-card";
+        card.dataset.materialSource = group;
         card.open = state.openClusterNames.has(cluster.name);
         card.addEventListener("toggle", () => {
             if (card.open) state.openClusterNames.add(cluster.name);
@@ -3597,7 +4180,13 @@ function renderColorClusters(clusters) {
             flags.className = "cluster-slot-flags";
             if (!isSlotEnabled(color)) {
                 flags.classList.add("is-inactive");
-                flags.textContent = "inactive";
+                if (Array.isArray(color.mdfFallbackRgba)) {
+                    flags.classList.add("is-mdf-default");
+                    flags.textContent = "MDF default";
+                    flags.title = "CMD slot is inactive; the game uses this color from the MDF material.";
+                } else {
+                    flags.textContent = "inactive";
+                }
             } else {
                 flags.classList.add("is-active");
                 flags.textContent = "active";
@@ -4260,6 +4849,7 @@ async function handleSelectedFiles(files) {
 
 function bindUi() {
     initializeHexActionButtons();
+    modTargetCancel?.addEventListener("click", () => modTargetDialog?.close(""));
     if ("indexedDB" in window) {
         colorLibraryOptions?.classList.remove("hidden");
     }
@@ -4348,6 +4938,7 @@ function bindUi() {
         try {
             await handleSelectedFiles(files);
         } catch (error) {
+            if (error?.name === "AbortError") return;
             console.error(error);
             showStatus(parserStatus, "bad", error.message || String(error));
             parserPanel?.classList.remove("hidden");
@@ -4359,6 +4950,7 @@ function bindUi() {
         try {
             await handleSelectedFiles(fileInput.files);
         } catch (error) {
+            if (error?.name === "AbortError") return;
             console.error(error);
             showStatus(parserStatus, "bad", error.message || String(error));
             parserPanel?.classList.remove("hidden");
@@ -4436,7 +5028,8 @@ function bindUi() {
         const cmd = state.cmdEntries[state.activeCmdIndex];
         if (!cmd) return;
 
-        new Uint8Array(cmd.workingBuffer).set(new Uint8Array(cmd.originalBuffer));
+        const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+        new Uint8Array(cmd.workingBuffer).set(new Uint8Array(baseline));
         for (const cluster of cmd.colorClusters) {
             for (const color of cluster.colors) {
                 const offset = color.color?.absoluteOffset;
@@ -4444,7 +5037,7 @@ function bindUi() {
                 updateColorModelAtOffset(
                     cmd,
                     offset,
-                    rgbaAtOffset(cmd.originalBuffer, offset),
+                    rgbaAtOffset(baseline, offset),
                 );
             }
         }
