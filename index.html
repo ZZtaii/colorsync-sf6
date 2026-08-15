@@ -959,7 +959,16 @@
         id="custom-color-picker"
         class="custom-color-picker hidden"
     >
-        <div class="color-picker-space-label">Visual color</div>
+        <div class="color-picker-header">
+            <div class="color-picker-space-label">Visual color</div>
+            <button
+                id="color-picker-reset-layout"
+                type="button"
+                class="color-picker-reset-layout"
+                aria-label="Reset color editor position and size"
+                title="Reset position and size"
+            ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 8.5A7 7 0 1 1 5 15M5.5 8.5V4m0 4.5H10"/></svg></button>
+        </div>
         <div
             id="color-picker-sv"
             class="color-picker-sv"
@@ -1023,14 +1032,47 @@
         </div>
 
         <div class="color-picker-runtime-readout" aria-label="Read-only runtime and REFramework color">
-            <span class="color-picker-runtime-label">Runtime / REFramework</span>
+            <span class="color-picker-runtime-label">
+                Runtime / REFramework
+                <span
+                    class="color-picker-runtime-info"
+                    tabindex="0"
+                    aria-label="About runtime color"
+                    aria-describedby="color-picker-runtime-tooltip"
+                >i</span>
+            </span>
             <span id="color-picker-runtime-swatch" class="color-picker-runtime-swatch" aria-hidden="true"></span>
             <output id="color-picker-runtime-hex" class="color-picker-runtime-hex">#FFFFFFFF</output>
             <span id="color-picker-runtime-name" class="color-picker-runtime-name">white</span>
             <span class="color-picker-runtime-lock">read-only</span>
+            <button
+                id="color-picker-runtime-match"
+                type="button"
+                class="secondary-button color-picker-runtime-match"
+                title="Use the current visual color as the desired runtime color"
+            >Match</button>
         </div>
 
+        <label class="color-picker-runtime-auto-match">
+            <input id="color-picker-runtime-auto-match" type="checkbox">
+            <span>Match runtime when editor closes</span>
+        </label>
+        <label class="color-picker-runtime-auto-match">
+            <input id="color-picker-runtime-match-paste" type="checkbox">
+            <span>Match pasted hex immediately</span>
+        </label>
+
+        <button
+            id="color-picker-resize"
+            type="button"
+            class="color-picker-resize"
+            aria-label="Resize color editor"
+            title="Drag to resize"
+        ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20 20 10M15 20l5-5M5 20 20 5"/></svg></button>
+
     </div>
+
+    <div id="color-picker-runtime-tooltip" class="color-picker-runtime-tooltip" role="tooltip" aria-hidden="true">Match adjusts the CMD hex so the runtime color stays as close as possible to the color you picked.</div>
 
     <dialog id="mod-target-dialog" class="mod-target-dialog" aria-labelledby="mod-target-title">
         <div class="mod-target-dialog-card">
