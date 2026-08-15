@@ -55,6 +55,10 @@ import {
 } from "./lib/sf6-colors.js";
 import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
 import {
+    loadDefaultMdfColorMaterials,
+    mergeMdfColorMaterials,
+} from "./lib/default-mdf-materials.js";
+import {
     addCustomMaterialCluster,
     extendMaterialClusterColorSlots,
 } from "./lib/rsz-instance-writer.js";
@@ -1366,6 +1370,7 @@ function discoverMdfColorMaterials(entries, { esfId, costumeFolder } = {}) {
                     customizeColorIndexes: new Set(),
                     paths: [],
                     defaultVariants: [],
+                    source: "mod",
                 };
                 material.customizeColorIndexes.forEach(index => current.customizeColorIndexes.add(index));
                 current.paths.push(path);
@@ -1460,12 +1465,31 @@ function resolveExternalCustomMaterialSources(libraryEntries, target) {
 }
 
 async function refreshDiscoveredCustomMaterials() {
+    const cmdEntriesSnapshot = state.cmdEntries.slice();
+    const importedModSnapshot = state.importedMod;
+    const refreshIsCurrent = () => (
+        state.importedMod === importedModSnapshot
+        && state.cmdEntries.length === cmdEntriesSnapshot.length
+        && state.cmdEntries.every((cmd, index) => cmd === cmdEntriesSnapshot[index])
+    );
     const target = state.cmdEntries[0]?.metadata;
-    state.customMdfMaterials = discoverMdfColorMaterials(
+    const importedMaterials = discoverMdfColorMaterials(
         state.importedMod?.entries,
         target,
     );
+    let defaultMaterials = [];
+    let fallbackWarning = "";
+    try {
+        defaultMaterials = await loadDefaultMdfColorMaterials(target);
+    } catch (error) {
+        if (!refreshIsCurrent()) return null;
+        console.warn("Could not load bundled default MDF materials:", error);
+        fallbackWarning = " Bundled MDF defaults could not be loaded; some inactive slots may be missing.";
+    }
+    if (!refreshIsCurrent()) return null;
+    state.customMdfMaterials = mergeMdfColorMaterials(importedMaterials, defaultMaterials);
     for (const material of state.customMdfMaterials) {
+        if (!refreshIsCurrent()) return null;
         const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
         const presentEverywhere = state.cmdEntries.every(cmd => (
             cmd.colorClusters.some(cluster => cluster.name === material.name)
@@ -1477,6 +1501,7 @@ async function refreshDiscoveredCustomMaterials() {
             ))
         ));
         if (completeEverywhere) continue;
+        if (material.source === "default" && !presentEverywhere) continue;
         const templateName = presentEverywhere
             ? material.name
             : automaticCustomMaterialTemplateName(material);
@@ -1489,10 +1514,12 @@ async function refreshDiscoveredCustomMaterials() {
             state.importedMod?.externalCustomMaterialSources?.[material.name],
         );
     }
+    if (!refreshIsCurrent()) return null;
     attachMdfFallbackColorsToCmdEntries();
     state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? [];
     renderColorClusters(state.colorClusters);
     renderSyncPanels();
+    return { fallbackWarning };
 }
 
 function attachMdfFallbackColorsToCmdEntries() {
@@ -1689,7 +1716,8 @@ async function handleModZip(file) {
         state.cmdEntries.forEach(cmd => {
             state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
         });
-        await refreshDiscoveredCustomMaterials();
+        const mdfRefresh = await refreshDiscoveredCustomMaterials();
+        if (!mdfRefresh) return;
         const loadedMeta = state.cmdEntries[0]?.metadata;
         const targetLivePaths = selectedRoot == null
             ? livePaths
@@ -1727,10 +1755,11 @@ async function handleModZip(file) {
         renderColorBackupPanel();
         showStatus(
             parserStatus,
-            "good",
+            mdfRefresh.fallbackWarning ? "warn" : "good",
             `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from ${modTargetName(selectedTarget || { root: modRoot, modinfoPath }, entries)}.`
             + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
-            + " Other mod files will be preserved on ZIP export.",
+            + " Other mod files will be preserved on ZIP export."
+            + mdfRefresh.fallbackWarning,
         );
     } finally {
         hideZipImportProgress();
@@ -1802,7 +1831,8 @@ async function loadCmdsFromColorLibrary(file) {
             libraryEntries,
             target,
         );
-        await refreshDiscoveredCustomMaterials();
+        const mdfRefresh = await refreshDiscoveredCustomMaterials();
+        if (!mdfRefresh) return;
         const stillMissing = missingPaletteNumbers(target);
         if (stillMissing.length) {
             if (colorLibraryHeading) colorLibraryHeading.textContent = `This mod includes ${10 - stillMissing.length} of 10 CMD palette files.`;
@@ -1814,9 +1844,10 @@ async function loadCmdsFromColorLibrary(file) {
         renderColorBackupPanel();
         showStatus(
             parserStatus,
-            "good",
+            mdfRefresh.fallbackWarning ? "warn" : "good",
             `Kept ${state.cmdEntries.length - matching.length} CMD file${state.cmdEntries.length - matching.length === 1 ? "" : "s"} from the mod and added ${matching.length} missing color${matching.length === 1 ? "" : "s"} from SF6 Colors.zip.`
-            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : ""),
+            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
+            + mdfRefresh.fallbackWarning,
         );
     } finally {
         hideZipImportProgress();
@@ -4945,6 +4976,11 @@ async function handleSelectedFiles(files) {
         updateZipFileNameField();
     }
     await handleFiles(incoming);
+    const mdfRefresh = await refreshDiscoveredCustomMaterials();
+    if (mdfRefresh?.fallbackWarning) {
+        showStatus(parserStatus, "warn", `CMDs loaded.${mdfRefresh.fallbackWarning}`);
+        revealStatus(parserStatus);
+    }
 }
 
 function bindUi() {
