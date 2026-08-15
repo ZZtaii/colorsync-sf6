@@ -74,6 +74,7 @@ import {
 } from "./lib/export-destinations.js";
 import {
     cmdRgbaToRuntimeRgba,
+    runtimeRgbaToCmdRgba,
 } from "./lib/sf6-color-space.js";
 
 
@@ -193,9 +194,13 @@ const colorPickerState = {
     originalRgba: [255, 255, 255, 255],
     onChange: null,
     onClose: null,
+    changed: false,
+    runtimeMatched: false,
+    savedBounds: null,
     hsv: { h: 0, s: 0, v: 1 },
     draggingSv: false,
     draggingWindow: false,
+    resizingWindow: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
 };
@@ -344,6 +349,13 @@ const colorPickerOriginalRestore = document.querySelector("#color-picker-origina
 const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-swatch");
 const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
 const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
+const colorPickerRuntimeMatch = document.querySelector("#color-picker-runtime-match");
+const colorPickerRuntimeInfo = document.querySelector(".color-picker-runtime-info");
+const colorPickerRuntimeTooltip = document.querySelector("#color-picker-runtime-tooltip");
+const colorPickerRuntimeAutoMatch = document.querySelector("#color-picker-runtime-auto-match");
+const colorPickerRuntimeMatchPaste = document.querySelector("#color-picker-runtime-match-paste");
+const colorPickerResetLayout = document.querySelector("#color-picker-reset-layout");
+const colorPickerResize = document.querySelector("#color-picker-resize");
 
 
 // ============================================================
@@ -541,6 +553,22 @@ function applyPersistedUiState() {
     }
     if (replaceDuplicateExportsInput && typeof saved.replaceDuplicateExports === "boolean") {
         replaceDuplicateExportsInput.checked = saved.replaceDuplicateExports;
+    }
+    if (colorPickerRuntimeAutoMatch && typeof saved.runtimeAutoMatch === "boolean") {
+        colorPickerRuntimeAutoMatch.checked = saved.runtimeAutoMatch;
+    }
+    if (colorPickerRuntimeMatchPaste && typeof saved.runtimeMatchPaste === "boolean") {
+        colorPickerRuntimeMatchPaste.checked = saved.runtimeMatchPaste;
+    }
+    const pickerBounds = saved.colorPickerBounds;
+    if (
+        pickerBounds
+        && Number.isFinite(pickerBounds.left)
+        && Number.isFinite(pickerBounds.top)
+        && Number.isFinite(pickerBounds.width)
+        && Number.isFinite(pickerBounds.height)
+    ) {
+        colorPickerState.savedBounds = { ...pickerBounds };
     }
 }
 
@@ -3142,9 +3170,16 @@ function renderOriginalColorReadout() {
     }
 }
 
-function syncPickerFromRgba(rgba, { skipHex = false } = {}) {
+function syncPickerFromRgba(rgba, { skipHex = false, preserveRuntimeMatch = false } = {}) {
     colorPickerState.rgba = rgba.map(clampByte);
     colorPickerState.hsv = rgbToHsv(rgba[0], rgba[1], rgba[2]);
+
+    if (colorPickerRuntimeMatch && !preserveRuntimeMatch) {
+        colorPickerRuntimeMatch.disabled = false;
+        colorPickerRuntimeMatch.textContent = "Match";
+        colorPickerRuntimeMatch.classList.remove("matched");
+        colorPickerRuntimeMatch.title = "Use the current visual color as the desired runtime color";
+    }
 
     const hex = rgbaToHexString(colorPickerState.rgba);
     if (colorPickerPreview) colorPickerPreview.style.background = hex;
@@ -3179,15 +3214,146 @@ function emitPickerChange() {
     }
 }
 
-function positionColorPicker(anchor) {
+function clampColorPickerBounds(bounds) {
+    const pad = 8;
+    const maxWidth = Math.max(1, window.innerWidth - (pad * 2));
+    const maxHeight = Math.max(1, window.innerHeight - (pad * 2));
+    const minWidth = Math.min(240, maxWidth);
+    const minHeight = Math.min(420, maxHeight);
+    const width = Math.min(maxWidth, Math.max(minWidth, Number(bounds.width) || minWidth));
+    const height = Math.min(maxHeight, Math.max(minHeight, Number(bounds.height) || minHeight));
+    const left = Math.min(
+        window.innerWidth - width - pad,
+        Math.max(pad, Number(bounds.left) || pad),
+    );
+    const top = Math.min(
+        window.innerHeight - height - pad,
+        Math.max(pad, Number(bounds.top) || pad),
+    );
+    return { left, top, width, height };
+}
+
+function applySavedColorPickerBounds() {
+    if (!customColorPicker || !colorPickerState.savedBounds) return false;
+    const bounds = clampColorPickerBounds(colorPickerState.savedBounds);
+    colorPickerState.savedBounds = bounds;
+    customColorPicker.style.left = `${bounds.left}px`;
+    customColorPicker.style.top = `${bounds.top}px`;
+    customColorPicker.style.width = `${bounds.width}px`;
+    customColorPicker.style.height = `${bounds.height}px`;
+    return true;
+}
+
+function saveCurrentColorPickerBounds() {
+    if (!customColorPicker || customColorPicker.classList.contains("hidden")) return;
+    const rect = customColorPicker.getBoundingClientRect();
+    const bounds = clampColorPickerBounds({
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+    });
+    colorPickerState.savedBounds = bounds;
+    saveUiState({ colorPickerBounds: bounds });
+}
+
+function resetColorPickerLayout() {
+    colorPickerState.savedBounds = null;
+    saveUiState({ colorPickerBounds: null });
+    if (!customColorPicker) return;
+    customColorPicker.style.width = "";
+    customColorPicker.style.height = "";
+    positionColorPicker(colorPickerState.anchor, { ignoreSaved: true });
+}
+
+function positionRuntimeColorTooltip() {
+    if (!colorPickerRuntimeInfo || !colorPickerRuntimeTooltip) return;
+    const anchorRect = colorPickerRuntimeInfo.getBoundingClientRect();
+    const tooltipRect = colorPickerRuntimeTooltip.getBoundingClientRect();
+    const pad = 8;
+    const gap = 8;
+    const left = Math.min(
+        window.innerWidth - tooltipRect.width - pad,
+        Math.max(pad, anchorRect.left + (anchorRect.width - tooltipRect.width) / 2),
+    );
+    let top = anchorRect.top - tooltipRect.height - gap;
+    if (top < pad) top = anchorRect.bottom + gap;
+    top = Math.min(window.innerHeight - tooltipRect.height - pad, Math.max(pad, top));
+    colorPickerRuntimeTooltip.style.left = `${left}px`;
+    colorPickerRuntimeTooltip.style.top = `${top}px`;
+}
+
+function showRuntimeColorTooltip() {
+    if (!colorPickerRuntimeTooltip) return;
+    positionRuntimeColorTooltip();
+    colorPickerRuntimeTooltip.classList.add("visible");
+    colorPickerRuntimeTooltip.setAttribute("aria-hidden", "false");
+}
+
+function hideRuntimeColorTooltip() {
+    colorPickerRuntimeTooltip?.classList.remove("visible");
+    colorPickerRuntimeTooltip?.setAttribute("aria-hidden", "true");
+}
+
+function markColorPickerChanged() {
+    colorPickerState.changed = true;
+    colorPickerState.runtimeMatched = false;
+}
+
+function matchPickerColorToRuntime() {
+    const desiredRuntimeRgba = colorPickerState.rgba.slice();
+    const desiredRuntimeHex = rgbaToHexString(desiredRuntimeRgba);
+    const cmdRgba = runtimeRgbaToCmdRgba(desiredRuntimeRgba);
+    const actualRuntimeRgba = cmdRgbaToRuntimeRgba(cmdRgba);
+    const exactMatch = rgbaEquals(actualRuntimeRgba, desiredRuntimeRgba);
+
+    syncPickerFromRgba(cmdRgba, { preserveRuntimeMatch: true });
+    emitPickerChange();
+    colorPickerState.changed = false;
+    colorPickerState.runtimeMatched = true;
+
+    if (colorPickerRuntimeMatch) {
+        colorPickerRuntimeMatch.textContent = exactMatch ? "Matched" : "Closest";
+        colorPickerRuntimeMatch.disabled = true;
+        colorPickerRuntimeMatch.classList.add("matched");
+        colorPickerRuntimeMatch.title = exactMatch
+            ? `CMD ${rgbaToHexString(cmdRgba)} produces runtime ${desiredRuntimeHex}`
+            : `CMD ${rgbaToHexString(cmdRgba)} produces the closest available runtime color`;
+    }
+}
+
+function positionColorPicker(anchor, { ignoreSaved = false } = {}) {
     if (!customColorPicker || !anchor) return;
+    if (!ignoreSaved && applySavedColorPickerBounds()) return;
     const rect = anchor.getBoundingClientRect();
     const pad = 8;
+    const contentGap = 12;
     const pw = customColorPicker.offsetWidth || 220;
     const ph = customColorPicker.offsetHeight || 280;
 
     let left = rect.left;
     let top = rect.bottom + pad;
+
+    // Material rows have a wide descriptive-name lane between the swatch and
+    // hex input. Prefer that lane so the picker leaves the useful color boxes
+    // and exact hex values visible; friendly names may sit behind the picker.
+    const slotRow = anchor.closest?.(".cluster-slot-row");
+    const rowHexInput = slotRow?.querySelector(".cluster-slot-hex");
+    if (rowHexInput) {
+        const hexRect = rowHexInput.getBoundingClientRect();
+        const controlsShareLine = Math.abs(hexRect.top - rect.top) < Math.max(rect.height, hexRect.height);
+        const laneLeft = rect.right + contentGap;
+        const laneRight = hexRect.left - contentGap;
+
+        if (controlsShareLine && laneRight - laneLeft >= pw) {
+            // Sit as far right as possible inside the name lane.
+            left = laneRight - pw;
+        } else if (hexRect.right + contentGap + pw <= window.innerWidth - pad) {
+            left = hexRect.right + contentGap;
+        } else if (rect.left - contentGap - pw >= pad) {
+            left = rect.left - contentGap - pw;
+        }
+    }
 
     if (left + pw > window.innerWidth - pad) {
         left = Math.max(pad, window.innerWidth - pw - pad);
@@ -3209,21 +3375,41 @@ function openCustomColorPicker(anchor, rgba, onChange, onClose = null, { origina
     colorPickerState.anchor = anchor;
     colorPickerState.onChange = onChange;
     colorPickerState.onClose = onClose;
+    colorPickerState.changed = false;
+    colorPickerState.runtimeMatched = false;
     colorPickerState.originalRgba = (originalRgba ?? rgba ?? [255, 255, 255, 255]).map(clampByte);
     syncPickerFromRgba(rgba ?? [255, 255, 255, 255]);
     customColorPicker?.classList.remove("hidden");
     positionColorPicker(anchor);
+    // The picker was hidden during the first sync, so refresh geometry now
+    // that its restored or default size is measurable.
+    syncPickerFromRgba(colorPickerState.rgba, {
+        skipHex: true,
+        preserveRuntimeMatch: true,
+    });
 }
 
 function closeCustomColorPicker() {
     const onClose = colorPickerState.onClose;
+    hideRuntimeColorTooltip();
+    if (
+        colorPickerRuntimeAutoMatch?.checked
+        && colorPickerState.changed
+        && !colorPickerState.runtimeMatched
+    ) {
+        matchPickerColorToRuntime();
+    }
     colorPickerState.open = false;
     colorPickerState.anchor = null;
     colorPickerState.onChange = null;
     colorPickerState.onClose = null;
+    colorPickerState.changed = false;
+    colorPickerState.runtimeMatched = false;
     colorPickerState.originalRgba = [255, 255, 255, 255];
     colorPickerState.draggingWindow = false;
+    colorPickerState.resizingWindow = false;
     customColorPicker?.classList.remove("is-dragging");
+    customColorPicker?.classList.remove("is-resizing");
     customColorPicker?.classList.add("hidden");
     onClose?.();
 }
@@ -3263,11 +3449,70 @@ function bindColorPickerEvents() {
     });
 
     const stopDraggingPickerWindow = () => {
+        const wasDragging = colorPickerState.draggingWindow;
         colorPickerState.draggingWindow = false;
         customColorPicker.classList.remove("is-dragging");
+        if (wasDragging) saveCurrentColorPickerBounds();
     };
     customColorPicker.addEventListener("pointerup", stopDraggingPickerWindow);
     customColorPicker.addEventListener("pointercancel", stopDraggingPickerWindow);
+
+    colorPickerResize?.addEventListener("pointerdown", event => {
+        if (event.button !== 0) return;
+        const rect = customColorPicker.getBoundingClientRect();
+        colorPickerState.resizingWindow = true;
+        colorPickerState.resizeStartX = event.clientX;
+        colorPickerState.resizeStartY = event.clientY;
+        colorPickerState.resizeStartWidth = rect.width;
+        colorPickerState.resizeStartHeight = rect.height;
+        colorPickerResize.setPointerCapture(event.pointerId);
+        customColorPicker.classList.add("is-resizing");
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    colorPickerResize?.addEventListener("pointermove", event => {
+        if (!colorPickerState.resizingWindow) return;
+        const rect = customColorPicker.getBoundingClientRect();
+        const pad = 8;
+        const maxWidth = Math.max(1, window.innerWidth - rect.left - pad);
+        const maxHeight = Math.max(1, window.innerHeight - rect.top - pad);
+        const minWidth = Math.min(240, maxWidth);
+        const minHeight = Math.min(420, maxHeight);
+        const width = Math.min(
+            maxWidth,
+            Math.max(minWidth, colorPickerState.resizeStartWidth + event.clientX - colorPickerState.resizeStartX),
+        );
+        const height = Math.min(
+            maxHeight,
+            Math.max(minHeight, colorPickerState.resizeStartHeight + event.clientY - colorPickerState.resizeStartY),
+        );
+        customColorPicker.style.width = `${width}px`;
+        customColorPicker.style.height = `${height}px`;
+        syncPickerFromRgba(colorPickerState.rgba, {
+            skipHex: true,
+            preserveRuntimeMatch: true,
+        });
+    });
+
+    const stopResizingPickerWindow = () => {
+        const wasResizing = colorPickerState.resizingWindow;
+        colorPickerState.resizingWindow = false;
+        customColorPicker.classList.remove("is-resizing");
+        if (wasResizing) saveCurrentColorPickerBounds();
+    };
+    colorPickerResize?.addEventListener("pointerup", stopResizingPickerWindow);
+    colorPickerResize?.addEventListener("pointercancel", stopResizingPickerWindow);
+    colorPickerResetLayout?.addEventListener("click", resetColorPickerLayout);
+    colorPickerRuntimeInfo?.addEventListener("mouseenter", showRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("mouseleave", hideRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("focus", showRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("blur", hideRuntimeColorTooltip);
+    customColorPicker.addEventListener("scroll", () => {
+        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
+            positionRuntimeColorTooltip();
+        }
+    });
 
     colorPickerHue?.addEventListener("input", () => {
         colorPickerState.hsv.h = Number(colorPickerHue.value) || 0;
@@ -3277,6 +3522,7 @@ function bindColorPickerEvents() {
             colorPickerState.hsv.v,
         );
         syncPickerFromRgba([r, g, b, colorPickerState.rgba[3]]);
+        markColorPickerChanged();
         emitPickerChange();
     });
 
@@ -3293,6 +3539,7 @@ function bindColorPickerEvents() {
             colorPickerState.hsv.v,
         );
         syncPickerFromRgba([r, g, b, colorPickerState.rgba[3]]);
+        markColorPickerChanged();
         emitPickerChange();
     };
 
@@ -3317,6 +3564,7 @@ function bindColorPickerEvents() {
             Number(colorPickerA?.value),
         ].map(clampByte);
         syncPickerFromRgba(rgba);
+        markColorPickerChanged();
         emitPickerChange();
     };
 
@@ -3329,12 +3577,38 @@ function bindColorPickerEvents() {
         const rgba = parseRgbaHex(colorPickerHex.value);
         if (!rgba) return;
         syncPickerFromRgba(rgba);
+        markColorPickerChanged();
         emitPickerChange();
+    });
+
+    colorPickerHex?.addEventListener("paste", event => {
+        if (!colorPickerRuntimeMatchPaste?.checked) return;
+        const desiredRuntimeRgba = parseRgbaHex(event.clipboardData?.getData("text"));
+        if (!desiredRuntimeRgba) return;
+
+        event.preventDefault();
+        syncPickerFromRgba(desiredRuntimeRgba);
+        markColorPickerChanged();
+        matchPickerColorToRuntime();
     });
 
     colorPickerOriginalRestore?.addEventListener("click", () => {
         syncPickerFromRgba(colorPickerState.originalRgba);
+        colorPickerState.changed = false;
+        colorPickerState.runtimeMatched = false;
         emitPickerChange();
+    });
+
+    colorPickerRuntimeMatch?.addEventListener("click", () => {
+        matchPickerColorToRuntime();
+    });
+
+    colorPickerRuntimeAutoMatch?.addEventListener("change", () => {
+        saveUiState({ runtimeAutoMatch: colorPickerRuntimeAutoMatch.checked });
+    });
+
+    colorPickerRuntimeMatchPaste?.addEventListener("change", () => {
+        saveUiState({ runtimeMatchPaste: colorPickerRuntimeMatchPaste.checked });
     });
 
     document.addEventListener("pointerdown", e => {
@@ -3359,6 +3633,9 @@ function bindColorPickerEvents() {
 
     window.addEventListener("resize", () => {
         if (colorPickerState.open) positionColorPicker(colorPickerState.anchor);
+        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
+            positionRuntimeColorTooltip();
+        }
     });
 }
 
@@ -4090,8 +4367,53 @@ function updateDxReferenceWarning() {
         : `<strong>DX files loaded:</strong> Their edits may not apply in-game. Use DX files as reference only.`;
 }
 
+function stepActiveCmd(delta) {
+    const total = state.cmdEntries.length;
+    if (total < 2) return;
+    loadActiveCmd((state.activeCmdIndex + delta + total) % total);
+}
+
+function createActiveCmdStepButton(direction) {
+    const isPrevious = direction < 0;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `active-cmd-step active-cmd-step-${isPrevious ? "previous" : "next"}`;
+    button.setAttribute("aria-label", `${isPrevious ? "Previous" : "Next"} active color`);
+    button.innerHTML = isPrevious
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5 9 12l5.5 5.5"/></svg>'
+        : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg>';
+
+    button.addEventListener("pointerdown", event => {
+        if (!event.isPrimary || event.button !== 0 || button.disabled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        stepActiveCmd(direction);
+    });
+    button.addEventListener("click", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.detail === 0 && !button.disabled) stepActiveCmd(direction);
+    });
+    return button;
+}
+
+function ensureActiveCmdStepper(select) {
+    if (!select) return null;
+    const existing = select.closest(".active-cmd-stepper");
+    if (existing) return existing;
+
+    const stepper = document.createElement("div");
+    stepper.className = "active-cmd-stepper";
+    const previous = createActiveCmdStepButton(-1);
+    const next = createActiveCmdStepButton(1);
+    select.before(stepper);
+    stepper.append(previous, select, next);
+    return stepper;
+}
+
 function renderActiveCmdDropdown(select) {
     if (!select) return;
+    const stepper = ensureActiveCmdStepper(select);
     const trigger = select.querySelector(".custom-select-trigger");
     const dropdown = select.querySelector(".custom-select-dropdown");
     const text = trigger?.querySelector(".cs-text");
@@ -4102,6 +4424,25 @@ function renderActiveCmdDropdown(select) {
     trigger.disabled = !activeCmd;
     trigger.classList.remove("open");
     trigger.setAttribute("aria-expanded", "false");
+
+    const total = state.cmdEntries.length;
+    const previous = stepper?.querySelector(".active-cmd-step-previous");
+    const next = stepper?.querySelector(".active-cmd-step-next");
+    const canStep = total > 1;
+    if (previous) {
+        previous.disabled = !canStep;
+        const previousIndex = (state.activeCmdIndex - 1 + total) % Math.max(total, 1);
+        previous.title = canStep
+            ? `Previous: ${cmdDisplayName(state.cmdEntries[previousIndex])}`
+            : "Previous active color";
+    }
+    if (next) {
+        next.disabled = !canStep;
+        const nextIndex = (state.activeCmdIndex + 1) % Math.max(total, 1);
+        next.title = canStep
+            ? `Next: ${cmdDisplayName(state.cmdEntries[nextIndex])}`
+            : "Next active color";
+    }
 
     dropdown.innerHTML = "";
     state.cmdEntries.forEach((cmd, index) => {
@@ -4331,6 +4672,15 @@ function renderColorClusters(clusters) {
             };
 
             hexInput.addEventListener("change", applyHex);
+            hexInput.addEventListener("paste", event => {
+                if (!colorPickerRuntimeMatchPaste?.checked) return;
+                const desiredRuntimeRgba = parseRgbaHex(event.clipboardData?.getData("text"));
+                if (!desiredRuntimeRgba) return;
+
+                event.preventDefault();
+                hexInput.value = rgbaToHexString(runtimeRgbaToCmdRgba(desiredRuntimeRgba));
+                applyHex();
+            });
 
             swatch.addEventListener("click", () => {
                 const rgba = slotRgba(color) ?? [0, 0, 0, 255];
@@ -4422,7 +4772,13 @@ async function pasteIntoHexInput(input) {
     input.select();
     try {
         const pasted = await navigator.clipboard.readText();
-        input.value = pasted;
+        const desiredRuntimeRgba = input.matches(".cluster-slot-hex")
+            && colorPickerRuntimeMatchPaste?.checked
+            ? parseRgbaHex(pasted)
+            : null;
+        input.value = desiredRuntimeRgba
+            ? rgbaToHexString(runtimeRgbaToCmdRgba(desiredRuntimeRgba))
+            : pasted;
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
     } catch {
