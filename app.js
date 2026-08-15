@@ -5398,16 +5398,25 @@ function bindUi() {
         renderReferenceViewer();
     };
 
-    referenceViewerPrev?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        stepReference(-1);
-    });
-    referenceViewerNext?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        stepReference(1);
-    });
+    const bindReferenceArrow = (button, delta) => {
+        button?.addEventListener("pointerdown", (event) => {
+            if (!event.isPrimary || event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            stepReference(delta);
+        });
+        button?.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            // Pointer activation already navigated on press; detail 0 preserves
+            // keyboard and assistive-technology button activation.
+            if (event.detail === 0) stepReference(delta);
+        });
+    };
+
+    bindReferenceArrow(referenceViewerPrev, -1);
+    bindReferenceArrow(referenceViewerNext, 1);
     window.addEventListener("keydown", (event) => {
         if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
         if (state.referenceMinimized || state.referenceImages.length < 2) return;
