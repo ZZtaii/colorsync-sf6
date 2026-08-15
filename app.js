@@ -72,10 +72,7 @@ import {
     exportFolderName,
     saveExportFile,
 } from "./lib/export-destinations.js";
-import {
-    cmdRgbaToRuntimeRgba,
-    runtimeRgbaToCmdRgba,
-} from "./lib/sf6-color-space.js";
+import { cmdRgbaToRuntimeRgba } from "./lib/sf6-color-space.js";
 
 
 // ============================================================
@@ -194,8 +191,6 @@ const colorPickerState = {
     originalRgba: [255, 255, 255, 255],
     onChange: null,
     onClose: null,
-    changed: false,
-    runtimeMatched: false,
     savedBounds: null,
     hsv: { h: 0, s: 0, v: 1 },
     draggingSv: false,
@@ -349,11 +344,6 @@ const colorPickerOriginalRestore = document.querySelector("#color-picker-origina
 const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-swatch");
 const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
 const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
-const colorPickerRuntimeMatch = document.querySelector("#color-picker-runtime-match");
-const colorPickerRuntimeInfo = document.querySelector(".color-picker-runtime-info");
-const colorPickerRuntimeTooltip = document.querySelector("#color-picker-runtime-tooltip");
-const colorPickerRuntimeAutoMatch = document.querySelector("#color-picker-runtime-auto-match");
-const colorPickerRuntimeMatchPaste = document.querySelector("#color-picker-runtime-match-paste");
 const colorPickerResetLayout = document.querySelector("#color-picker-reset-layout");
 const colorPickerResize = document.querySelector("#color-picker-resize");
 
@@ -553,12 +543,6 @@ function applyPersistedUiState() {
     }
     if (replaceDuplicateExportsInput && typeof saved.replaceDuplicateExports === "boolean") {
         replaceDuplicateExportsInput.checked = saved.replaceDuplicateExports;
-    }
-    if (colorPickerRuntimeAutoMatch && typeof saved.runtimeAutoMatch === "boolean") {
-        colorPickerRuntimeAutoMatch.checked = saved.runtimeAutoMatch;
-    }
-    if (colorPickerRuntimeMatchPaste && typeof saved.runtimeMatchPaste === "boolean") {
-        colorPickerRuntimeMatchPaste.checked = saved.runtimeMatchPaste;
     }
     const pickerBounds = saved.colorPickerBounds;
     if (
@@ -3170,16 +3154,9 @@ function renderOriginalColorReadout() {
     }
 }
 
-function syncPickerFromRgba(rgba, { skipHex = false, preserveRuntimeMatch = false } = {}) {
+function syncPickerFromRgba(rgba, { skipHex = false } = {}) {
     colorPickerState.rgba = rgba.map(clampByte);
     colorPickerState.hsv = rgbToHsv(rgba[0], rgba[1], rgba[2]);
-
-    if (colorPickerRuntimeMatch && !preserveRuntimeMatch) {
-        colorPickerRuntimeMatch.disabled = false;
-        colorPickerRuntimeMatch.textContent = "Match";
-        colorPickerRuntimeMatch.classList.remove("matched");
-        colorPickerRuntimeMatch.title = "Use the current visual color as the desired runtime color";
-    }
 
     const hex = rgbaToHexString(colorPickerState.rgba);
     if (colorPickerPreview) colorPickerPreview.style.background = hex;
@@ -3266,62 +3243,6 @@ function resetColorPickerLayout() {
     positionColorPicker(colorPickerState.anchor, { ignoreSaved: true });
 }
 
-function positionRuntimeColorTooltip() {
-    if (!colorPickerRuntimeInfo || !colorPickerRuntimeTooltip) return;
-    const anchorRect = colorPickerRuntimeInfo.getBoundingClientRect();
-    const tooltipRect = colorPickerRuntimeTooltip.getBoundingClientRect();
-    const pad = 8;
-    const gap = 8;
-    const left = Math.min(
-        window.innerWidth - tooltipRect.width - pad,
-        Math.max(pad, anchorRect.left + (anchorRect.width - tooltipRect.width) / 2),
-    );
-    let top = anchorRect.top - tooltipRect.height - gap;
-    if (top < pad) top = anchorRect.bottom + gap;
-    top = Math.min(window.innerHeight - tooltipRect.height - pad, Math.max(pad, top));
-    colorPickerRuntimeTooltip.style.left = `${left}px`;
-    colorPickerRuntimeTooltip.style.top = `${top}px`;
-}
-
-function showRuntimeColorTooltip() {
-    if (!colorPickerRuntimeTooltip) return;
-    positionRuntimeColorTooltip();
-    colorPickerRuntimeTooltip.classList.add("visible");
-    colorPickerRuntimeTooltip.setAttribute("aria-hidden", "false");
-}
-
-function hideRuntimeColorTooltip() {
-    colorPickerRuntimeTooltip?.classList.remove("visible");
-    colorPickerRuntimeTooltip?.setAttribute("aria-hidden", "true");
-}
-
-function markColorPickerChanged() {
-    colorPickerState.changed = true;
-    colorPickerState.runtimeMatched = false;
-}
-
-function matchPickerColorToRuntime() {
-    const desiredRuntimeRgba = colorPickerState.rgba.slice();
-    const desiredRuntimeHex = rgbaToHexString(desiredRuntimeRgba);
-    const cmdRgba = runtimeRgbaToCmdRgba(desiredRuntimeRgba);
-    const actualRuntimeRgba = cmdRgbaToRuntimeRgba(cmdRgba);
-    const exactMatch = rgbaEquals(actualRuntimeRgba, desiredRuntimeRgba);
-
-    syncPickerFromRgba(cmdRgba, { preserveRuntimeMatch: true });
-    emitPickerChange();
-    colorPickerState.changed = false;
-    colorPickerState.runtimeMatched = true;
-
-    if (colorPickerRuntimeMatch) {
-        colorPickerRuntimeMatch.textContent = exactMatch ? "Matched" : "Closest";
-        colorPickerRuntimeMatch.disabled = true;
-        colorPickerRuntimeMatch.classList.add("matched");
-        colorPickerRuntimeMatch.title = exactMatch
-            ? `CMD ${rgbaToHexString(cmdRgba)} produces runtime ${desiredRuntimeHex}`
-            : `CMD ${rgbaToHexString(cmdRgba)} produces the closest available runtime color`;
-    }
-}
-
 function positionColorPicker(anchor, { ignoreSaved = false } = {}) {
     if (!customColorPicker || !anchor) return;
     if (!ignoreSaved && applySavedColorPickerBounds()) return;
@@ -3375,36 +3296,21 @@ function openCustomColorPicker(anchor, rgba, onChange, onClose = null, { origina
     colorPickerState.anchor = anchor;
     colorPickerState.onChange = onChange;
     colorPickerState.onClose = onClose;
-    colorPickerState.changed = false;
-    colorPickerState.runtimeMatched = false;
     colorPickerState.originalRgba = (originalRgba ?? rgba ?? [255, 255, 255, 255]).map(clampByte);
     syncPickerFromRgba(rgba ?? [255, 255, 255, 255]);
     customColorPicker?.classList.remove("hidden");
     positionColorPicker(anchor);
     // The picker was hidden during the first sync, so refresh geometry now
     // that its restored or default size is measurable.
-    syncPickerFromRgba(colorPickerState.rgba, {
-        skipHex: true,
-        preserveRuntimeMatch: true,
-    });
+    syncPickerFromRgba(colorPickerState.rgba, { skipHex: true });
 }
 
 function closeCustomColorPicker() {
     const onClose = colorPickerState.onClose;
-    hideRuntimeColorTooltip();
-    if (
-        colorPickerRuntimeAutoMatch?.checked
-        && colorPickerState.changed
-        && !colorPickerState.runtimeMatched
-    ) {
-        matchPickerColorToRuntime();
-    }
     colorPickerState.open = false;
     colorPickerState.anchor = null;
     colorPickerState.onChange = null;
     colorPickerState.onClose = null;
-    colorPickerState.changed = false;
-    colorPickerState.runtimeMatched = false;
     colorPickerState.originalRgba = [255, 255, 255, 255];
     colorPickerState.draggingWindow = false;
     colorPickerState.resizingWindow = false;
@@ -3489,10 +3395,7 @@ function bindColorPickerEvents() {
         );
         customColorPicker.style.width = `${width}px`;
         customColorPicker.style.height = `${height}px`;
-        syncPickerFromRgba(colorPickerState.rgba, {
-            skipHex: true,
-            preserveRuntimeMatch: true,
-        });
+        syncPickerFromRgba(colorPickerState.rgba, { skipHex: true });
     });
 
     const stopResizingPickerWindow = () => {
@@ -3504,15 +3407,6 @@ function bindColorPickerEvents() {
     colorPickerResize?.addEventListener("pointerup", stopResizingPickerWindow);
     colorPickerResize?.addEventListener("pointercancel", stopResizingPickerWindow);
     colorPickerResetLayout?.addEventListener("click", resetColorPickerLayout);
-    colorPickerRuntimeInfo?.addEventListener("mouseenter", showRuntimeColorTooltip);
-    colorPickerRuntimeInfo?.addEventListener("mouseleave", hideRuntimeColorTooltip);
-    colorPickerRuntimeInfo?.addEventListener("focus", showRuntimeColorTooltip);
-    colorPickerRuntimeInfo?.addEventListener("blur", hideRuntimeColorTooltip);
-    customColorPicker.addEventListener("scroll", () => {
-        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
-            positionRuntimeColorTooltip();
-        }
-    });
 
     colorPickerHue?.addEventListener("input", () => {
         colorPickerState.hsv.h = Number(colorPickerHue.value) || 0;
@@ -3522,7 +3416,6 @@ function bindColorPickerEvents() {
             colorPickerState.hsv.v,
         );
         syncPickerFromRgba([r, g, b, colorPickerState.rgba[3]]);
-        markColorPickerChanged();
         emitPickerChange();
     });
 
@@ -3539,7 +3432,6 @@ function bindColorPickerEvents() {
             colorPickerState.hsv.v,
         );
         syncPickerFromRgba([r, g, b, colorPickerState.rgba[3]]);
-        markColorPickerChanged();
         emitPickerChange();
     };
 
@@ -3564,7 +3456,6 @@ function bindColorPickerEvents() {
             Number(colorPickerA?.value),
         ].map(clampByte);
         syncPickerFromRgba(rgba);
-        markColorPickerChanged();
         emitPickerChange();
     };
 
@@ -3577,38 +3468,12 @@ function bindColorPickerEvents() {
         const rgba = parseRgbaHex(colorPickerHex.value);
         if (!rgba) return;
         syncPickerFromRgba(rgba);
-        markColorPickerChanged();
         emitPickerChange();
-    });
-
-    colorPickerHex?.addEventListener("paste", event => {
-        if (!colorPickerRuntimeMatchPaste?.checked) return;
-        const desiredRuntimeRgba = parseRgbaHex(event.clipboardData?.getData("text"));
-        if (!desiredRuntimeRgba) return;
-
-        event.preventDefault();
-        syncPickerFromRgba(desiredRuntimeRgba);
-        markColorPickerChanged();
-        matchPickerColorToRuntime();
     });
 
     colorPickerOriginalRestore?.addEventListener("click", () => {
         syncPickerFromRgba(colorPickerState.originalRgba);
-        colorPickerState.changed = false;
-        colorPickerState.runtimeMatched = false;
         emitPickerChange();
-    });
-
-    colorPickerRuntimeMatch?.addEventListener("click", () => {
-        matchPickerColorToRuntime();
-    });
-
-    colorPickerRuntimeAutoMatch?.addEventListener("change", () => {
-        saveUiState({ runtimeAutoMatch: colorPickerRuntimeAutoMatch.checked });
-    });
-
-    colorPickerRuntimeMatchPaste?.addEventListener("change", () => {
-        saveUiState({ runtimeMatchPaste: colorPickerRuntimeMatchPaste.checked });
     });
 
     document.addEventListener("pointerdown", e => {
@@ -3633,9 +3498,6 @@ function bindColorPickerEvents() {
 
     window.addEventListener("resize", () => {
         if (colorPickerState.open) positionColorPicker(colorPickerState.anchor);
-        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
-            positionRuntimeColorTooltip();
-        }
     });
 }
 
@@ -4672,15 +4534,6 @@ function renderColorClusters(clusters) {
             };
 
             hexInput.addEventListener("change", applyHex);
-            hexInput.addEventListener("paste", event => {
-                if (!colorPickerRuntimeMatchPaste?.checked) return;
-                const desiredRuntimeRgba = parseRgbaHex(event.clipboardData?.getData("text"));
-                if (!desiredRuntimeRgba) return;
-
-                event.preventDefault();
-                hexInput.value = rgbaToHexString(runtimeRgbaToCmdRgba(desiredRuntimeRgba));
-                applyHex();
-            });
 
             swatch.addEventListener("click", () => {
                 const rgba = slotRgba(color) ?? [0, 0, 0, 255];
@@ -4772,13 +4625,7 @@ async function pasteIntoHexInput(input) {
     input.select();
     try {
         const pasted = await navigator.clipboard.readText();
-        const desiredRuntimeRgba = input.matches(".cluster-slot-hex")
-            && colorPickerRuntimeMatchPaste?.checked
-            ? parseRgbaHex(pasted)
-            : null;
-        input.value = desiredRuntimeRgba
-            ? rgbaToHexString(runtimeRgbaToCmdRgba(desiredRuntimeRgba))
-            : pasted;
+        input.value = pasted;
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
     } catch {

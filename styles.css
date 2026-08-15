@@ -5168,8 +5168,8 @@ main.page-width {
     grid-template-columns: 36px minmax(0, 1fr) auto;
     grid-template-areas:
         "label label lock"
-        "swatch hex action"
-        "swatch name action";
+        "swatch hex hex"
+        "swatch name name";
     gap: 3px 9px;
     padding: 10px;
     border: 1px solid rgba(126, 146, 190, 0.24);
@@ -5179,65 +5179,9 @@ main.page-width {
 
 .color-picker-runtime-label {
     grid-area: label;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
     color: var(--text);
     font-size: 0.72rem;
     font-weight: 700;
-}
-
-.color-picker-runtime-info {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    flex: 0 0 16px;
-    border: 1px solid rgba(126, 146, 190, 0.55);
-    border-radius: 999px;
-    color: var(--muted);
-    font-family: serif;
-    font-size: 0.68rem;
-    font-style: italic;
-    line-height: 1;
-    cursor: help;
-}
-
-.color-picker-runtime-info:hover,
-.color-picker-runtime-info:focus-visible {
-    border-color: rgba(126, 167, 255, 0.8);
-    color: var(--text);
-    outline: none;
-}
-
-.color-picker-runtime-tooltip {
-    position: fixed;
-    z-index: 2500;
-    width: min(240px, calc(100vw - 16px));
-    padding: 9px 10px;
-    border: 1px solid rgba(126, 146, 190, 0.4);
-    border-radius: 8px;
-    background: #1b1f27;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 500;
-    line-height: 1.4;
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transform: translateY(4px);
-    transition: opacity 0.12s ease, transform 0.12s ease, visibility 0s linear 0.12s;
-}
-
-.color-picker-runtime-tooltip.visible {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-    transition-delay: 0s;
 }
 
 .color-picker-runtime-lock {
@@ -5276,36 +5220,6 @@ main.page-width {
     font-size: 0.72rem;
 }
 
-.color-picker-runtime-match {
-    grid-area: action;
-    align-self: center;
-    min-height: 32px;
-    padding: 0 10px;
-    font-size: 0.72rem;
-}
-
-.color-picker-runtime-match.matched {
-    border-color: rgba(80, 200, 120, 0.8);
-    color: #a8e6ba;
-}
-
-.color-picker-runtime-auto-match {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--muted);
-    font-size: 0.72rem;
-    line-height: 1.3;
-    cursor: pointer;
-}
-
-.color-picker-runtime-auto-match input {
-    width: 15px;
-    height: 15px;
-    flex: 0 0 15px;
-    margin: 0;
-    accent-color: var(--accent);
-}
 
 .color-picker-original-readout {
     display: grid;
