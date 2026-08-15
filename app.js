@@ -54,7 +54,10 @@ import {
     summarizeSf6ColorClusters,
 } from "./lib/sf6-colors.js";
 import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
-import { addCustomMaterialCluster } from "./lib/rsz-instance-writer.js";
+import {
+    addCustomMaterialCluster,
+    extendMaterialClusterColorSlots,
+} from "./lib/rsz-instance-writer.js";
 import {
     buildSf6ReferenceImages,
     validateReferenceImages,
@@ -1463,11 +1466,20 @@ async function refreshDiscoveredCustomMaterials() {
         target,
     );
     for (const material of state.customMdfMaterials) {
-        const existsEverywhere = state.cmdEntries.every(cmd => (
+        const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
+        const presentEverywhere = state.cmdEntries.every(cmd => (
             cmd.colorClusters.some(cluster => cluster.name === material.name)
         ));
-        if (existsEverywhere) continue;
-        const templateName = automaticCustomMaterialTemplateName(material);
+        const completeEverywhere = state.cmdEntries.every(cmd => (
+            cmd.colorClusters.some(cluster => (
+                cluster.name === material.name
+                && cluster.colors.length >= requiredCount
+            ))
+        ));
+        if (completeEverywhere) continue;
+        const templateName = presentEverywhere
+            ? material.name
+            : automaticCustomMaterialTemplateName(material);
         if (!templateName) {
             throw new Error(`Cannot add MDF material ${material.name}: no compatible CMD color-slot structure exists in every palette.`);
         }
@@ -3629,7 +3641,12 @@ function customMaterialTemplateNames(material) {
 
 function orderAutoInsertedMaterials(clusters, mappings = state.customMaterialMappings) {
     if (!Array.isArray(clusters) || !mappings.length) return clusters;
-    const order = new Map(mappings.map((mapping, index) => [mapping.name.toLowerCase(), index]));
+    const order = new Map(mappings.flatMap((mapping, index) => (
+        mapping.templateName !== mapping.name
+            ? [[mapping.name.toLowerCase(), index]]
+            : []
+    )));
+    if (!order.size) return clusters;
     const inserted = [];
     const regular = [];
     for (const cluster of clusters) {
@@ -3699,15 +3716,19 @@ function customMaterialInitialSlots(mapping, cmd) {
 }
 
 function initializeCustomMaterialSlots(buffer, mapping, cmd) {
+    return initializeCustomMaterialSlotsFrom(buffer, mapping, cmd, 0);
+}
+
+function initializeCustomMaterialSlotsFrom(buffer, mapping, cmd, startIndex) {
     const sourceSlots = customMaterialInitialSlots(mapping, cmd);
     if (!sourceSlots?.length) return buffer;
     const current = inspectCmdBuffer(buffer);
     const cluster = current.colorClusters.find(candidate => candidate.name === mapping.name);
-    if (!cluster || cluster.colors.length !== sourceSlots.length) {
+    if (!cluster || cluster.colors.length < sourceSlots.length) {
         throw new Error(`${cmdDisplayName(cmd)} could not initialize ${mapping.name} from its source colors.`);
     }
     sourceSlots.forEach((source, index) => {
-        if (!source) return;
+        if (!source || index < startIndex) return;
         const target = cluster.colors[index];
         writeRgbaAtOffset(buffer, target.color.absoluteOffset, source.rgba);
         if (Number.isInteger(target.enable?.absoluteOffset)) {
@@ -3729,9 +3750,23 @@ function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappi
     let changed = false;
     for (const mapping of mappings) {
         const current = inspectCmdBuffer(buffer);
-        if (current.colorClusters.some(cluster => cluster.name === mapping.name)) continue;
         const sourceSlots = customMaterialInitialSlots(mapping, cmd);
         const colorCount = sourceSlots?.length || Math.max(...mapping.customizeColorIndexes, -1) + 1;
+        const existing = current.colorClusters.find(cluster => cluster.name === mapping.name);
+        if (existing?.colors.length >= colorCount) continue;
+        if (existing) {
+            const previousCount = existing.colors.length;
+            buffer = extendMaterialClusterColorSlots({
+                buffer,
+                ...current,
+                typeRegistry,
+                clusterInstanceId: existing.instanceId,
+                colorCount,
+            });
+            buffer = initializeCustomMaterialSlotsFrom(buffer, mapping, cmd, previousCount);
+            changed = true;
+            continue;
+        }
         const template = current.colorClusters.find(cluster => (
             cluster.name === mapping.templateName
             && cluster.colors.length >= colorCount
@@ -3783,12 +3818,26 @@ async function addDiscoveredCustomMaterial(materialName, templateName, sourceMap
     const rebuiltEntries = [];
     for (const cmd of state.cmdEntries) {
         const current = inspectCmdBuffer(cmd.workingBuffer);
-        if (current.colorClusters.some(cluster => cluster.name === material.name)) {
+        const sourceSlots = customMaterialInitialSlots(nextMapping, cmd);
+        const colorCount = sourceSlots?.length || Math.max(...material.customizeColorIndexes, -1) + 1;
+        const existing = current.colorClusters.find(cluster => cluster.name === material.name);
+        if (existing?.colors.length >= colorCount) {
             rebuiltEntries.push({ cmd, buffer: cmd.workingBuffer, parsed: current });
             continue;
         }
-        const sourceSlots = customMaterialInitialSlots(nextMapping, cmd);
-        const colorCount = sourceSlots?.length || Math.max(...material.customizeColorIndexes, -1) + 1;
+        if (existing) {
+            const buffer = extendMaterialClusterColorSlots({
+                buffer: cmd.workingBuffer,
+                ...current,
+                typeRegistry,
+                clusterInstanceId: existing.instanceId,
+                colorCount,
+            });
+            initializeCustomMaterialSlotsFrom(buffer, nextMapping, cmd, existing.colors.length);
+            const parsed = inspectCmdBuffer(buffer);
+            rebuiltEntries.push({ cmd, buffer, parsed });
+            continue;
+        }
         const template = current.colorClusters.find(cluster => (
             cluster.name === templateName
             && cluster.colors.length >= colorCount
@@ -4123,7 +4172,11 @@ function renderColorClusters(clusters) {
     clusterInspector.innerHTML = "";
 
     const customNames = new Set(
-        state.customMaterialMappings.map(mapping => mapping.name.toLowerCase()),
+        state.customMaterialMappings.flatMap(mapping => (
+            mapping.templateName !== mapping.name
+                ? [mapping.name.toLowerCase()]
+                : []
+        )),
     );
     const renderedClusters = orderAutoInsertedMaterials(clusters ?? []);
     const hasCustom = renderedClusters.some(cluster => (
