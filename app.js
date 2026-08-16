@@ -72,7 +72,10 @@ import {
     exportFolderName,
     saveExportFile,
 } from "./lib/export-destinations.js";
-import { cmdRgbaToRuntimeRgba } from "./lib/sf6-color-space.js";
+import {
+    cmdRgbaToRuntimeRgba,
+    runtimeRgbaToCmdRgba,
+} from "./lib/sf6-color-space.js";
 
 
 // ============================================================
@@ -344,6 +347,7 @@ const colorPickerOriginalRestore = document.querySelector("#color-picker-origina
 const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-swatch");
 const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
 const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
+const colorPickerRuntimePaste = document.querySelector("#color-picker-runtime-paste");
 const colorPickerResetLayout = document.querySelector("#color-picker-reset-layout");
 const colorPickerResize = document.querySelector("#color-picker-resize");
 
@@ -3469,6 +3473,26 @@ function bindColorPickerEvents() {
         if (!rgba) return;
         syncPickerFromRgba(rgba);
         emitPickerChange();
+    });
+
+    colorPickerRuntimePaste?.addEventListener("click", async () => {
+        let succeeded = false;
+        try {
+            const runtimeRgba = parseRgbaHex(await navigator.clipboard.readText());
+            if (runtimeRgba) {
+                syncPickerFromRgba(runtimeRgbaToCmdRgba(runtimeRgba));
+                emitPickerChange();
+                succeeded = true;
+            }
+        } catch {
+            // Clipboard permission failures use the same brief visual feedback
+            // as invalid clipboard contents.
+        }
+
+        colorPickerRuntimePaste.classList.add(succeeded ? "paste-succeeded" : "paste-failed");
+        setTimeout(() => {
+            colorPickerRuntimePaste.classList.remove("paste-succeeded", "paste-failed");
+        }, 800);
     });
 
     colorPickerOriginalRestore?.addEventListener("click", () => {
