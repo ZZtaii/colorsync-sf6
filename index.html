@@ -651,19 +651,30 @@
                     <span class="section-icon">◆</span>
                     <div>
                         <h2>Current Changes</h2>
-                        <p class="section-description">Review, edit, or revert every color change currently staged for export.</p>
+                        <p class="section-description">Review, edit, or revert every color change currently staged for export. Save a color state to resume later after loading the same ZIP or CMD set.</p>
                     </div>
                 </div>
 
-                <button
-                    id="revert-all-changes"
-                    type="button"
-                    class="secondary-button"
-                    disabled
-                >
-                    Revert All
-                </button>
+                <div class="color-state-actions">
+                    <button id="save-color-state" type="button" class="secondary-button" disabled>
+                        Save Current Color State
+                    </button>
+                    <button id="load-color-state" type="button" class="secondary-button" disabled>
+                        Load Color State
+                    </button>
+                    <input id="color-state-file" type="file" accept=".json,.sf6colors,application/json" class="hidden">
+                    <button
+                        id="revert-all-changes"
+                        type="button"
+                        class="secondary-button"
+                        disabled
+                    >
+                        Revert All
+                    </button>
+                </div>
             </div>
+
+            <div id="color-state-status" class="status-box hidden" role="status" aria-live="polite"></div>
 
             <div id="current-changes-empty" class="status-box">
                 No changes yet.

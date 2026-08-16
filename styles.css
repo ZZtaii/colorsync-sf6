@@ -2001,6 +2001,27 @@ details.cluster-card[open] > summary::before {
     margin-top: 4px;
 }
 
+.color-state-actions {
+    display: flex;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.color-state-actions .secondary-button {
+    min-height: 38px;
+    padding: 0 14px;
+}
+
+.color-state-actions #revert-all-changes {
+    margin-top: 0;
+}
+
+#color-state-status:not(.hidden) {
+    margin-bottom: 1rem;
+}
+
 .current-changes-list {
     display: flex;
     flex-direction: column;

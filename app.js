@@ -15,6 +15,7 @@
 //   @anchor buffer-mutation
 //   @anchor sync-engine
 //   @anchor changes-replace
+//   @anchor color-state
 //   @anchor export
 //   @anchor color-picker
 //   @anchor reference-viewer
@@ -70,6 +71,7 @@ import {
     chooseExportFolder,
     clearExportFolder,
     exportFolderName,
+    isStaleFileSystemHandleError,
     saveExportFile,
 } from "./lib/export-destinations.js";
 import {
@@ -278,6 +280,10 @@ const currentChangesPanel = document.querySelector("#current-changes-panel");
 const currentChangesList = document.querySelector("#current-changes-list");
 const currentChangesEmpty = document.querySelector("#current-changes-empty");
 const revertAllChangesBtn = document.querySelector("#revert-all-changes");
+const saveColorStateBtn = document.querySelector("#save-color-state");
+const loadColorStateBtn = document.querySelector("#load-color-state");
+const colorStateFileInput = document.querySelector("#color-state-file");
+const colorStateStatus = document.querySelector("#color-state-status");
 
 const colorReplacePanel = document.querySelector("#color-replace-panel");
 const replaceFindColorInput = document.querySelector("#replace-find-color");
@@ -774,9 +780,17 @@ function describeCmdExport(exported) {
 
     const renamed = saved.filter(item => item.renamed);
     const replaced = saved.filter(item => item.replaced);
+    const replaceFailed = saved.filter(item => item.replaceFailed);
     let message = `${parts.join(" and ")}.`;
-    if (renamed.length) message += ` Renamed to ${listExportNames(renamed)} to avoid replacing an existing file.`;
+    if (renamed.length) {
+        message += replaceFailed.length
+            ? ` The existing target could not be replaced, so the export was saved as ${listExportNames(renamed)} in the same folder.`
+            : ` Renamed to ${listExportNames(renamed)} to avoid replacing an existing file.`;
+    }
     if (replaced.length) message += ` Replaced existing ${listExportNames(replaced)}.`;
+    if (downloaded.some(item => item.folderReset)) {
+        message += " The saved export folder or target file changed on disk, so the folder was forgotten; choose it again to restore direct saving.";
+    }
     return message.charAt(0).toUpperCase() + message.slice(1);
 }
 
@@ -786,11 +800,18 @@ function describeZipExport(result) {
     const fileLabel = `${fileCount} CMD file${fileCount === 1 ? "" : "s"}`;
     const zipLabel = result.colorsOnly ? "colors-only ZIP" : "mod ZIP";
     if (destination.mode === "download") {
-        return `Built ${zipLabel} with ${fileLabel}; sent “${destination.filename}” to browser downloads.`;
+        return `Built ${zipLabel} with ${fileLabel}; sent “${destination.filename}” to browser downloads.`
+            + (destination.folderReset
+                ? " The saved export folder or target file changed on disk, so the folder was forgotten; choose it again to restore direct saving."
+                : "");
     }
 
     let message = `Built ${zipLabel} with ${fileLabel}. Saved to your selected Mod ZIP folder: “${destination.folderName}/${destination.filename}”.`;
-    if (destination.renamed) message += " Renamed to avoid replacing an existing file.";
+    if (destination.renamed) {
+        message += destination.replaceFailed
+            ? " Edge could not replace the existing target, so the export was saved under this new name in the same folder. Close programs using the original ZIP before replacing it manually."
+            : " Renamed to avoid replacing an existing file.";
+    }
     if (destination.replaced) message += ` Replaced existing “${destination.originalFilename}”.`;
     return message;
 }
@@ -1056,7 +1077,19 @@ function readZipWithProgress(file) {
             setZipImportProgress(`Reading mod ZIP… ${Math.round(percent)}%`, percent);
         });
         reader.addEventListener("load", () => resolve(reader.result));
-        reader.addEventListener("error", () => reject(reader.error || new Error("Could not read mod ZIP.")));
+        reader.addEventListener("error", () => {
+            const error = reader.error || new Error("Could not read mod ZIP.");
+            if (isStaleFileSystemHandleError(error)) {
+                reject(new Error(
+                    `“${file.name}” changed on disk while the browser was reading it. `
+                    + "Wait for Fluffy Mod Manager or another program to finish using the ZIP, then select it again. "
+                    + "If it keeps changing, edit a copied ZIP instead.",
+                    { cause: error },
+                ));
+                return;
+            }
+            reject(error);
+        });
         reader.readAsArrayBuffer(file);
     });
 }
@@ -1573,6 +1606,7 @@ function resetLoadedCmdState() {
     state.detectedCostume = null;
     state.customMdfMaterials = [];
     state.customMaterialMappings = [];
+    hideStatus(colorStateStatus);
 }
 
 function clearScreenshot() {
@@ -2842,6 +2876,207 @@ function renderCurrentChanges() {
 
 
 // ============================================================
+// @anchor color-state
+// PORTABLE COLOR-STATE SAVE / RESUME
+// ============================================================
+
+const COLOR_STATE_FORMAT = "sf6-cmd-color-state";
+const COLOR_STATE_VERSION = 1;
+const MAX_COLOR_STATE_BYTES = 16 * 1024 * 1024;
+
+function editableColorStateSlots(cmd) {
+    return cmd.colorClusters.flatMap((cluster, clusterIndex) => cluster.colors
+        .filter(isSlotEditable)
+        .map(slot => ({ cluster, clusterIndex, slot })));
+}
+
+function buildColorStateDocument() {
+    if (!state.cmdEntries.length) throw new Error("Load a mod ZIP or CMD files before saving a color state.");
+
+    return {
+        format: COLOR_STATE_FORMAT,
+        version: COLOR_STATE_VERSION,
+        createdAt: new Date().toISOString(),
+        source: {
+            characterId: state.detectedEsfId,
+            characterName: state.detectedCharacterName,
+            costume: state.detectedCostume,
+            archiveName: state.importedMod?.sourceName ?? null,
+        },
+        commands: state.cmdEntries.map(cmd => ({
+            identity: cmdIdentityKey(cmd.metadata),
+            filename: cmd.file.name,
+            metadata: {
+                esfId: cmd.metadata.esfId,
+                costumeFolder: cmd.metadata.costumeFolder,
+                variant: cmd.metadata.variant,
+                paletteFolder: cmd.metadata.paletteFolder,
+                version: cmd.metadata.version,
+            },
+            slots: editableColorStateSlots(cmd).map(({ cluster, clusterIndex, slot }) => ({
+                clusterIndex,
+                material: cluster.name,
+                slotIndex: slot.index,
+                runtimeName: slot.runtimeName,
+                rgba: rgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset),
+                enabled: enabledAtOffset(
+                    cmd.workingBuffer,
+                    slot.enable?.absoluteOffset,
+                    slot.enable?.byteLength,
+                ),
+            })),
+        })),
+    };
+}
+
+function colorStateFilename() {
+    const sourceName = state.importedMod?.sourceName || state.cmdEntries[0]?.file.name || "sf6-colors";
+    const stem = sourceName
+        .replace(/\.zip$/i, "")
+        .replace(/\.user\.\d+$/i, "")
+        .replace(/[<>:"/\\|?*]+/g, "_")
+        .trim() || "sf6-colors";
+    return `${stem}.sf6colors.json`;
+}
+
+async function saveCurrentColorState() {
+    const document = buildColorStateDocument();
+    const bytes = new TextEncoder().encode(`${JSON.stringify(document, null, 2)}\n`);
+    const filename = colorStateFilename();
+    const destination = await saveExportFile("state", bytes, filename, { type: "application/json" });
+    const slotCount = document.commands.reduce((total, cmd) => total + cmd.slots.length, 0);
+    return { destination, filename, commandCount: document.commands.length, slotCount };
+}
+
+function validateColorStateDocument(document) {
+    if (!document || typeof document !== "object" || Array.isArray(document)) {
+        throw new Error("This is not a valid SF6 Color Sync state file.");
+    }
+    if (document.format !== COLOR_STATE_FORMAT || document.version !== COLOR_STATE_VERSION) {
+        throw new Error("This color state uses an unsupported format or version.");
+    }
+    if (!Array.isArray(document.commands) || !document.commands.length) {
+        throw new Error("This color state contains no CMD color data.");
+    }
+    if (!state.cmdEntries.length) {
+        throw new Error("Load the original mod ZIP or CMD files before loading a color state.");
+    }
+
+    const loadedByIdentity = new Map(state.cmdEntries.map(cmd => [cmdIdentityKey(cmd.metadata), cmd]));
+    const savedByIdentity = new Map();
+    for (const savedCmd of document.commands) {
+        if (!savedCmd || typeof savedCmd.identity !== "string" || savedByIdentity.has(savedCmd.identity)) {
+            throw new Error("The color state contains an invalid or duplicate CMD identity.");
+        }
+        savedByIdentity.set(savedCmd.identity, savedCmd);
+    }
+
+    const missingFromLoaded = [...savedByIdentity.keys()].filter(key => !loadedByIdentity.has(key));
+    const missingFromState = [...loadedByIdentity.keys()].filter(key => !savedByIdentity.has(key));
+    if (missingFromLoaded.length || missingFromState.length) {
+        throw new Error(
+            "The loaded ZIP/CMD set does not match this color state. Load the same character, outfit, variants, and palettes used when it was saved.",
+        );
+    }
+
+    const operations = [];
+    for (const [identity, savedCmd] of savedByIdentity) {
+        const cmd = loadedByIdentity.get(identity);
+        if (!Array.isArray(savedCmd.slots)) {
+            throw new Error(`Color data is missing for ${savedCmd.filename || identity}.`);
+        }
+
+        const expectedSlots = editableColorStateSlots(cmd);
+        if (savedCmd.slots.length !== expectedSlots.length) {
+            throw new Error(
+                `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
+            );
+        }
+
+        const seenTargets = new Set();
+        for (const savedSlot of savedCmd.slots) {
+            const { clusterIndex, material, slotIndex, rgba, enabled } = savedSlot || {};
+            if (!Number.isInteger(clusterIndex) || clusterIndex < 0 || !Number.isInteger(slotIndex)) {
+                throw new Error(`The color state has an invalid slot address in ${savedCmd.filename || identity}.`);
+            }
+            const cluster = cmd.colorClusters[clusterIndex];
+            const slot = cluster?.colors.find(candidate => candidate.index === slotIndex);
+            const targetKey = `${clusterIndex}|${slotIndex}`;
+            if (!cluster || cluster.name !== material || !isSlotEditable(slot) || seenTargets.has(targetKey)) {
+                throw new Error(
+                    `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
+                );
+            }
+            if (!Array.isArray(rgba) || rgba.length !== 4
+                || rgba.some(value => !Number.isInteger(value) || value < 0 || value > 255)) {
+                throw new Error(`The color state contains invalid RGBA data in ${savedCmd.filename || identity}.`);
+            }
+            if (enabled !== null && typeof enabled !== "boolean") {
+                throw new Error(`The color state contains an invalid active state in ${savedCmd.filename || identity}.`);
+            }
+            if (enabled !== null && (!slot.enable || !Number.isInteger(slot.enable.absoluteOffset))) {
+                throw new Error(`The loaded CMD cannot restore an active state recorded in ${savedCmd.filename || identity}.`);
+            }
+            seenTargets.add(targetKey);
+            operations.push({ cmd, slot, rgba: rgba.slice(), enabled });
+        }
+    }
+    return operations;
+}
+
+function applyColorStateDocument(document) {
+    const operations = validateColorStateDocument(document);
+    let changedSlots = 0;
+
+    for (const { cmd, slot, rgba, enabled } of operations) {
+        const currentRgba = rgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset);
+        const currentEnabled = enabledAtOffset(
+            cmd.workingBuffer,
+            slot.enable?.absoluteOffset,
+            slot.enable?.byteLength,
+        );
+        if (!rgbaEquals(currentRgba, rgba) || currentEnabled !== enabled) changedSlots += 1;
+
+        writeRgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset, rgba);
+        updateColorModelAtOffset(cmd, slot.color.absoluteOffset, rgba);
+        if (enabled !== null) {
+            writeEnableAtOffset(
+                cmd.workingBuffer,
+                slot.enable.absoluteOffset,
+                slot.enable.byteLength ?? 1,
+                enabled,
+            );
+            slot.enabled = enabled;
+            slot.enable.value = enabled;
+        }
+    }
+
+    state.surpriseSnapshots.clear();
+    state.inspectorDirty = state.cmdEntries.some(cmd => (
+        diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
+    ));
+    updateInspectorDirtyUi();
+    renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+    return { commandCount: document.commands.length, slotCount: operations.length, changedSlots };
+}
+
+async function loadColorStateFile(file) {
+    if (!file) throw new Error("Choose a color-state file.");
+    if (file.size > MAX_COLOR_STATE_BYTES) throw new Error("Color-state files are limited to 16 MiB.");
+    let document;
+    try {
+        document = JSON.parse(await file.text());
+    } catch {
+        throw new Error("The selected file is not valid JSON.");
+    }
+    return applyColorStateDocument(document);
+}
+
+
+// ============================================================
 // @anchor export
 // EXPORT
 // ============================================================
@@ -2906,9 +3141,12 @@ function buildExportChangelog(changedCmds) {
 
 function updateExportButtons() {
     const hasChanges = state.cmdEntries.some(cmd => diffBuffers(exportBaseline(cmd), cmd.workingBuffer).length > 0);
+    const hasCmds = state.cmdEntries.length > 0;
     if (buildButton) buildButton.disabled = !hasChanges;
     if (exportCmdButton) exportCmdButton.disabled = !hasChanges;
     if (exportColorsZipButton) exportColorsZipButton.disabled = !state.importedMod || state.cmdEntries.length === 0;
+    if (saveColorStateBtn) saveColorStateBtn.disabled = !hasCmds;
+    if (loadColorStateBtn) loadColorStateBtn.disabled = !hasCmds;
 }
 
 function updateZipFileNameField() {
@@ -5200,6 +5438,7 @@ async function handleSelectedFiles(files) {
     if (!state.cmdEntries.length) {
         state.importedMod = null;
         if (zipFileNameInput) zipFileNameInput.value = "";
+        hideStatus(colorStateStatus);
         updateZipFileNameField();
     }
     await handleFiles(incoming);
@@ -5555,6 +5794,7 @@ function bindUi() {
         try {
             showStatus(exportCmdStatus, "", "Exporting modified CMD files…");
             const exported = await exportModifiedCmdFiles();
+            await refreshExportDestinationUi();
             showTemporaryStatus(
                 exportCmdStatus,
                 "good",
@@ -5573,6 +5813,7 @@ function bindUi() {
         try {
             showStatus(buildStatus, "", colorsOnly ? "Building colors-only ZIP…" : "Building mod ZIP…");
             const result = await buildModZip({ colorsOnly });
+            await refreshExportDestinationUi();
             showTemporaryStatus(
                 buildStatus,
                 "good",
@@ -5590,6 +5831,54 @@ function bindUi() {
 
     buildButton?.addEventListener("click", () => runZipBuild(false));
     exportColorsZipButton?.addEventListener("click", () => runZipBuild(true));
+
+    saveColorStateBtn?.addEventListener("click", async () => {
+        try {
+            saveColorStateBtn.disabled = true;
+            showStatus(colorStateStatus, "", "Saving current color state…");
+            const result = await saveCurrentColorState();
+            showTemporaryStatus(
+                colorStateStatus,
+                "good",
+                `Saved ${result.commandCount} CMD file${result.commandCount === 1 ? "" : "s"}`
+                + ` and ${result.slotCount} color slot${result.slotCount === 1 ? "" : "s"}`
+                + ` to “${result.filename}” in browser downloads.`,
+            );
+            revealExportStatus(colorStateStatus);
+        } catch (error) {
+            console.error(error);
+            showStatus(colorStateStatus, "bad", error.message || String(error));
+        } finally {
+            updateExportButtons();
+        }
+    });
+
+    loadColorStateBtn?.addEventListener("click", () => colorStateFileInput?.click());
+    colorStateFileInput?.addEventListener("change", async () => {
+        const file = colorStateFileInput.files?.[0];
+        if (!file) return;
+        try {
+            loadColorStateBtn.disabled = true;
+            showStatus(colorStateStatus, "", `Loading “${file.name}”…`);
+            const result = await loadColorStateFile(file);
+            const status = result.changedSlots ? "good" : "warn";
+            const detail = result.changedSlots
+                ? `Restored ${result.changedSlots} changed slot${result.changedSlots === 1 ? "" : "s"}.`
+                : "The loaded colors already match this state.";
+            showTemporaryStatus(
+                colorStateStatus,
+                status,
+                `Loaded color state for ${result.commandCount} CMD file${result.commandCount === 1 ? "" : "s"}. ${detail}`,
+            );
+            revealExportStatus(colorStateStatus);
+        } catch (error) {
+            console.error(error);
+            showStatus(colorStateStatus, "bad", error.message || String(error));
+        } finally {
+            colorStateFileInput.value = "";
+            updateExportButtons();
+        }
+    });
 
     revertAllChangesBtn?.addEventListener("click", () => {
         revertAllChanges();
