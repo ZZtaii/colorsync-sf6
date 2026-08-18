@@ -3914,8 +3914,28 @@ label.color-library-picker > span {
 
 .color-library-download a:hover,
 .color-library-download a:focus-visible {
-    color: var(--accent-hover);
-    text-decoration: underline;
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+/* Keep the homepage support links on the site's blue accent palette. */
+.info-card p a[href*="nexusmods.com/streetfighter6/mods/3837"],
+.info-card p a[href="https://github.com/ZZtaii/colorsync-sf6"],
+.info-card p a[href="https://www.patreon.com/ZZtai/posts/buy-me-coffee-167011360"] {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(126, 167, 255, 0.55);
+  text-underline-offset: 3px;
+}
+
+.info-card p a[href*="nexusmods.com/streetfighter6/mods/3837"]:hover,
+.info-card p a[href*="nexusmods.com/streetfighter6/mods/3837"]:focus-visible,
+.info-card p a[href="https://github.com/ZZtaii/colorsync-sf6"]:hover,
+.info-card p a[href="https://github.com/ZZtaii/colorsync-sf6"]:focus-visible,
+.info-card p a[href="https://www.patreon.com/ZZtai/posts/buy-me-coffee-167011360"]:hover,
+.info-card p a[href="https://www.patreon.com/ZZtai/posts/buy-me-coffee-167011360"]:focus-visible {
+  color: var(--accent-hover);
+  text-decoration-color: currentColor;
 }
 
 #remember-color-library-field {
