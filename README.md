@@ -17,10 +17,22 @@ to a server.
 
 ## Features
 
+- Edit Street Fighter 6 CMD palette colors in your browser.
+- Sync colors and patterns across costume palettes.
+- Copy a complete palette to another color with Duplicate Palette.
+- Save your color work and restore it later.
+- Export finished palettes as a mod-ready ZIP.
+
+## Detailed features
+
 - Edit RGBA values and Enable bytes in-place.
 - Color Sync: copy an active CMD slot to one or more target slots.
 - Pattern Sync: apply the same slot mapping across selected CMD palettes.
+- Duplicate Palette: copy a complete palette from a standard, EX, or DX source
+  into matching standard target palettes, with an option to undo the last copy.
 - Replace an exact color throughout the active CMD.
+- Save and restore color states as portable files when you want to resume work
+  on the same CMD or ZIP set later.
 - Randomize the active slots in one material with Surprise Me, preserving alpha
   and inactive slots, then keep or discard the result.
 - Review and revert individual staged changes before export.
