@@ -1043,7 +1043,15 @@
         </div>
 
         <div class="color-picker-runtime-readout color-picker-reference-card" aria-label="Runtime and REFramework color converter">
-            <span class="color-picker-runtime-label">Runtime / REFramework</span>
+            <span class="color-picker-runtime-label">
+                Runtime / REFramework
+                <span
+                    class="color-picker-runtime-info"
+                    tabindex="0"
+                    aria-label="About runtime color"
+                    aria-describedby="color-picker-runtime-tooltip"
+                >i</span>
+            </span>
             <span id="color-picker-runtime-swatch" class="color-picker-runtime-swatch" aria-hidden="true"></span>
             <output id="color-picker-runtime-hex" class="color-picker-runtime-hex">#FFFFFFFF</output>
             <span id="color-picker-runtime-name" class="color-picker-runtime-name">white</span>
@@ -1059,6 +1067,8 @@
         ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20 20 10M15 20l5-5M5 20 20 5"/></svg></button>
 
     </div>
+
+    <div id="color-picker-runtime-tooltip" class="color-picker-runtime-tooltip" role="tooltip" aria-hidden="true">Final colors depend on textures and lighting. Runtime / REFramework shows the game color. The editor shows the color stored in the CMD file.</div>
 
     <dialog id="mod-target-dialog" class="mod-target-dialog" aria-labelledby="mod-target-title">
         <div class="mod-target-dialog-card">

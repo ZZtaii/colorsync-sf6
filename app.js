@@ -354,6 +354,8 @@ const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-s
 const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
 const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
 const colorPickerRuntimePaste = document.querySelector("#color-picker-runtime-paste");
+const colorPickerRuntimeInfo = document.querySelector(".color-picker-runtime-info");
+const colorPickerRuntimeTooltip = document.querySelector("#color-picker-runtime-tooltip");
 const colorPickerResetLayout = document.querySelector("#color-picker-reset-layout");
 const colorPickerResize = document.querySelector("#color-picker-resize");
 
@@ -3485,6 +3487,35 @@ function resetColorPickerLayout() {
     positionColorPicker(colorPickerState.anchor, { ignoreSaved: true });
 }
 
+function positionRuntimeColorTooltip() {
+    if (!colorPickerRuntimeInfo || !colorPickerRuntimeTooltip) return;
+    const anchorRect = colorPickerRuntimeInfo.getBoundingClientRect();
+    const tooltipRect = colorPickerRuntimeTooltip.getBoundingClientRect();
+    const pad = 8;
+    const gap = 8;
+    const left = Math.min(
+        window.innerWidth - tooltipRect.width - pad,
+        Math.max(pad, anchorRect.left + (anchorRect.width - tooltipRect.width) / 2),
+    );
+    let top = anchorRect.top - tooltipRect.height - gap;
+    if (top < pad) top = anchorRect.bottom + gap;
+    top = Math.min(window.innerHeight - tooltipRect.height - pad, Math.max(pad, top));
+    colorPickerRuntimeTooltip.style.left = `${left}px`;
+    colorPickerRuntimeTooltip.style.top = `${top}px`;
+}
+
+function showRuntimeColorTooltip() {
+    if (!colorPickerRuntimeTooltip) return;
+    positionRuntimeColorTooltip();
+    colorPickerRuntimeTooltip.classList.add("visible");
+    colorPickerRuntimeTooltip.setAttribute("aria-hidden", "false");
+}
+
+function hideRuntimeColorTooltip() {
+    colorPickerRuntimeTooltip?.classList.remove("visible");
+    colorPickerRuntimeTooltip?.setAttribute("aria-hidden", "true");
+}
+
 function positionColorPicker(anchor, { ignoreSaved = false } = {}) {
     if (!customColorPicker || !anchor) return;
     if (!ignoreSaved && applySavedColorPickerBounds()) return;
@@ -3549,6 +3580,7 @@ function openCustomColorPicker(anchor, rgba, onChange, onClose = null, { origina
 
 function closeCustomColorPicker() {
     const onClose = colorPickerState.onClose;
+    hideRuntimeColorTooltip();
     colorPickerState.open = false;
     colorPickerState.anchor = null;
     colorPickerState.onChange = null;
@@ -3649,6 +3681,15 @@ function bindColorPickerEvents() {
     colorPickerResize?.addEventListener("pointerup", stopResizingPickerWindow);
     colorPickerResize?.addEventListener("pointercancel", stopResizingPickerWindow);
     colorPickerResetLayout?.addEventListener("click", resetColorPickerLayout);
+    colorPickerRuntimeInfo?.addEventListener("mouseenter", showRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("mouseleave", hideRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("focus", showRuntimeColorTooltip);
+    colorPickerRuntimeInfo?.addEventListener("blur", hideRuntimeColorTooltip);
+    customColorPicker.addEventListener("scroll", () => {
+        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
+            positionRuntimeColorTooltip();
+        }
+    });
 
     colorPickerHue?.addEventListener("input", () => {
         colorPickerState.hsv.h = Number(colorPickerHue.value) || 0;
@@ -3760,6 +3801,9 @@ function bindColorPickerEvents() {
 
     window.addEventListener("resize", () => {
         if (colorPickerState.open) positionColorPicker(colorPickerState.anchor);
+        if (colorPickerRuntimeTooltip?.classList.contains("visible")) {
+            positionRuntimeColorTooltip();
+        }
     });
 }
 
