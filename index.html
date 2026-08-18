@@ -110,7 +110,7 @@
             id="file-panel"
         >
             <div class="section-title"><span class="section-number">1</span><div><h2>Select CMD Files or a Mod ZIP</h2><p class="section-description">
-                Load CMD files from one character and outfit, or a mod ZIP up to 200 MiB. Standard, EX, and DX filenames are accepted; DX files are reference-only and edits may not apply in-game. ZIP imports preserve its other mod files, metadata, and root image for export.
+                Load CMD files from one character and outfit, or a mod ZIP up to 200 MiB. Standard, EX, and DX filenames are accepted; EX/DX files are reference-only and edits may not apply in-game. ZIP imports preserve its other mod files, metadata, and root image for export.
             </p></div></div>
 
             <div
@@ -328,7 +328,7 @@
 
 
         <!-- ==================================================
-             COLOR / PATTERN SYNC
+             COLOR / PATTERN / PALETTE SYNC
              ================================================== -->
 
         <section
@@ -340,7 +340,7 @@
                 <div>
                     <h2>Sync Colors</h2>
                     <p class="section-description">
-                        Color Sync edits one CMD. Pattern Sync applies the same material/slot mapping across many CMDs, using each palette’s own source color.
+                        Color Sync edits one CMD. Pattern Sync applies the same material/slot mapping across many CMDs, using each palette’s own source color. Duplicate Palette copies one complete palette into selected targets.
                     </p>
                 </div>
             </div>
@@ -348,6 +348,7 @@
             <div class="sync-mode-tabs" role="tablist">
                 <button type="button" class="sync-mode-tab active" data-sync-mode="color">Color Sync</button>
                 <button type="button" class="sync-mode-tab" data-sync-mode="pattern">Pattern Sync</button>
+                <button type="button" class="sync-mode-tab" data-sync-mode="duplicate">Duplicate Palette</button>
             </div>
 
             <!-- Color Sync: active CMD only -->
@@ -517,6 +518,39 @@
                 </div>
 
                 <button id="apply-pattern-sync" type="button">Apply Pattern Sync</button>
+            </div>
+
+            <!-- Duplicate Palette: one complete CMD into selected standard CMDs -->
+            <div id="duplicate-palette-pane" class="hidden">
+                <div class="sync-active-cmd-picker">
+                    <span>Source palette</span>
+                    <div id="duplicate-source-cmd" class="custom-select active-cmd-select">
+                        <button type="button" class="custom-select-trigger" aria-label="Source palette for Duplicate Palette" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="cs-text">Select a source palette</span>
+                            <span class="cs-arrow">&#x25BC;</span>
+                        </button>
+                        <div class="custom-select-dropdown hidden" role="listbox"></div>
+                    </div>
+                </div>
+                <p id="duplicate-palette-note" class="sync-active-line muted-inline"></p>
+
+                <div class="sync-target-section">
+                    <div class="sync-target-header">
+                        <span class="sync-target-label">Target palettes</span>
+                        <div class="sync-target-toggles">
+                            <button type="button" id="duplicate-target-select-all" class="small-button">All</button>
+                            <button type="button" id="duplicate-target-select-none" class="small-button">None</button>
+                        </div>
+                    </div>
+                    <div id="duplicate-target-cmds" class="sync-target-grid target-cmd-grid"></div>
+                </div>
+
+                <div class="duplicate-palette-actions">
+                    <button id="apply-duplicate-palette" type="button">Duplicate Palette</button>
+                    <button id="undo-duplicate-palette" type="button" class="secondary-button hidden" disabled>
+                        Undo Last Duplicate
+                    </button>
+                </div>
             </div>
 
             <div

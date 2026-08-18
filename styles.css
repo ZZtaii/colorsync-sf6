@@ -2264,8 +2264,37 @@ input[type="number"]::-webkit-inner-spin-button {
 
 #apply-sync-button,
 #apply-color-sync,
-#apply-pattern-sync {
+#apply-pattern-sync,
+#apply-duplicate-palette {
     margin-top: 20px;
+}
+
+.duplicate-palette-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.duplicate-palette-actions > button {
+    margin-top: 0;
+}
+
+#apply-duplicate-palette,
+#undo-duplicate-palette {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0;
+    min-height: 46px;
+    padding: 0 20px;
+    width: auto;
+    max-width: 100%;
+}
+
+.sync-empty-note {
+    margin: 10px 12px;
 }
 
 .sync-mode-tabs {

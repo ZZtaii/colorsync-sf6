@@ -14,6 +14,7 @@
 //   @anchor custom-materials
 //   @anchor buffer-mutation
 //   @anchor sync-engine
+//   @anchor palette-duplicate
 //   @anchor changes-replace
 //   @anchor color-state
 //   @anchor export
@@ -167,7 +168,7 @@ const state = {
     customMdfMaterials: [],
     customMaterialMappings: [],
 
-    syncMode: "color", // "color" | "pattern"
+    syncMode: "color", // "color" | "pattern" | "duplicate"
 
     // Color Sync: one active CMD
     colorSync: {
@@ -184,6 +185,14 @@ const state = {
         targetMaterial: "",
         targetSlotIndexes: [],
         targetCmdIndexes: [],
+    },
+
+    // Duplicate Palette: one complete palette into selected standard CMDs.
+    // EX/DX CMDs may be selected as sources, but never as targets.
+    paletteDuplicate: {
+        sourceCmdIndex: null,
+        targetCmdIndexes: [],
+        undo: null,
     },
 };
 
@@ -266,6 +275,8 @@ const modTargetCancel = document.querySelector("#mod-target-cancel");
 const activeCmdSelect = document.querySelector("#active-cmd-select");
 const colorSyncActiveCmdSelect = document.querySelector("#color-sync-active-cmd");
 const patternSyncActiveCmdSelect = document.querySelector("#pattern-sync-active-cmd");
+const duplicateSourceCmdSelect = document.querySelector("#duplicate-source-cmd");
+const duplicatePaletteUndoBtn = document.querySelector("#undo-duplicate-palette");
 const replaceActiveCmdSelect = document.querySelector("#replace-active-cmd");
 const cmdInspectorControls = document.querySelector("#cmd-inspector-controls");
 const multiCmdInspectorNotice = document.querySelector("#multi-cmd-inspector-notice");
@@ -848,6 +859,10 @@ function parseCmdFilename(filename) {
         isDxReference: match.groups.variant?.toLowerCase() === "dx",
         version: Number(match.groups.version),
     };
+}
+
+function isReferenceCmdMetadata(metadata) {
+    return metadata?.variant === "ex" || metadata?.variant === "dx";
 }
 
 async function hasUsrMagic(file) {
@@ -1614,6 +1629,7 @@ function resetLoadedCmdState() {
     state.detectedCostume = null;
     state.customMdfMaterials = [];
     state.customMaterialMappings = [];
+    state.paletteDuplicate.undo = null;
     hideStatus(colorStateStatus);
 }
 
@@ -1678,12 +1694,33 @@ async function handleModZip(file) {
         }
         const standardCmdPaths = selectedTarget?.cmdPaths || allStandardCmdPaths;
         const selectedRoot = selectedTarget?.root ?? null;
+        const standardScopes = standardCmdPaths
+            .map(path => parseCmdFilename(zipEntryBaseName(path)))
+            .filter(Boolean);
+        const standardScopeKeys = new Set(standardScopes.map(metadata => (
+            `${metadata.esfId}|${metadata.costumeFolder}|${metadata.version}`
+        )));
+        const referenceCmdPaths = livePaths.filter(path => {
+            if (selectedRoot != null && !path.startsWith(selectedRoot)) return false;
+            const metadata = parseCmdFilename(zipEntryBaseName(path));
+            return Boolean(
+                metadata
+                && (metadata.variant === "ex" || metadata.variant === "dx")
+                && metadata.paletteNumber >= 1
+                && metadata.paletteNumber <= 10
+                && standardScopeKeys.has(
+                    `${metadata.esfId}|${metadata.costumeFolder}|${metadata.version}`,
+                ),
+            );
+        });
+        const loadedCmdPaths = standardCmdPaths.concat(referenceCmdPaths);
+        const loadedReferencePathSet = new Set(referenceCmdPaths);
         const ignoredVariantCount = livePaths.filter(path => {
             if (selectedRoot != null && !path.startsWith(selectedRoot)) return false;
             const metadata = parseCmdFilename(zipEntryBaseName(path));
-            return metadata && metadata.variant !== "standard";
+            return metadata && metadata.variant !== "standard" && !loadedReferencePathSet.has(path);
         }).length;
-        const cmdEntries = standardCmdPaths
+        const cmdEntries = loadedCmdPaths
             .map(path => new File([entries[path]], zipEntryBaseName(path), { type: "application/octet-stream" }));
 
         // Some mod managers ZIP the mod contents directly, while others include
@@ -1746,11 +1783,11 @@ async function handleModZip(file) {
             modinfoText,
             sourceName: file.name,
             referenceImagePath: screenshotPath,
-            cmdPaths: Object.fromEntries(standardCmdPaths.map(path => [
-                cmdIdentityKey(parseStandardCmdFilename(zipEntryBaseName(path))),
+            cmdPaths: Object.fromEntries(loadedCmdPaths.map(path => [
+                cmdIdentityKey(parseCmdFilename(zipEntryBaseName(path))),
                 path,
             ])),
-            hadLiveCmd: Object.fromEntries(standardCmdPaths.map(path => [path, true])),
+            hadLiveCmd: Object.fromEntries(loadedCmdPaths.map(path => [path, true])),
             lastZipExportBuffers: {},
             modinfoByRoot: Object.fromEntries(modinfoPaths.map(path => [zipEntryDirectory(path), path])),
             colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
@@ -1815,7 +1852,8 @@ async function handleModZip(file) {
             parserStatus,
             mdfRefresh.fallbackWarning ? "warn" : "good",
             `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from ${modTargetName(selectedTarget || { root: modRoot, modinfoPath }, entries)}.`
-            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
+            + (referenceCmdPaths.length ? ` Loaded ${referenceCmdPaths.length} EX/DX reference file${referenceCmdPaths.length === 1 ? "" : "s"}.` : "")
+            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} non-selected variant file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
             + " Other mod files will be preserved on ZIP export."
             + mdfRefresh.fallbackWarning,
         );
@@ -2086,7 +2124,7 @@ async function handleFiles(fileCollection) {
     }
 
     const addedCount = newlyParsed.length;
-    const dxAddedCount = newlyParsed.filter(cmd => cmd.metadata.isDxReference).length;
+    const referenceAddedCount = newlyParsed.filter(cmd => isReferenceCmdMetadata(cmd.metadata)).length;
     const skipCount = duplicates.length + mismatched.length + rejectedIncoming.length;
     let msg =
         addedCount > 0
@@ -2100,13 +2138,13 @@ async function handleFiles(fileCollection) {
     if (skipCount > 0) {
         msg += ` Skipped ${skipCount}.`;
     }
-    if (dxAddedCount > 0) {
-        msg += ` ${dxAddedCount} DX file${dxAddedCount === 1 ? " is" : "s are"} reference-only; edits may not apply in-game.`;
+    if (referenceAddedCount > 0) {
+        msg += ` ${referenceAddedCount} EX/DX file${referenceAddedCount === 1 ? " is" : "s are"} reference-only; edits may not apply in-game.`;
     }
 
     showStatus(
         parserStatus,
-        (skipCount > 0 || dxAddedCount > 0) ? "warn" : (addedCount > 0 ? "good" : "warn"),
+        (skipCount > 0 || referenceAddedCount > 0) ? "warn" : (addedCount > 0 ? "good" : "warn"),
         msg,
     );
     revealStatus(parserStatus);
@@ -2287,6 +2325,50 @@ function firstEnabledSlotIndex(slots) {
     return slots[0]?.index ?? 0;
 }
 
+function isDuplicatePaletteSource(cmd) {
+    const meta = cmd?.metadata;
+    return Boolean(
+        meta
+        && (meta.variant === "standard" || meta.variant === "ex" || meta.variant === "dx")
+        && meta.paletteNumber >= 1
+        && meta.paletteNumber <= 10,
+    );
+}
+
+function duplicatePaletteScopeMatches(source, target) {
+    const sourceMeta = source?.metadata;
+    const targetMeta = target?.metadata;
+    return Boolean(
+        sourceMeta
+        && targetMeta
+        && sourceMeta.esfId === targetMeta.esfId
+        && sourceMeta.costumeFolder === targetMeta.costumeFolder
+        && sourceMeta.version === targetMeta.version,
+    );
+}
+
+function listDuplicatePaletteSourceIndexes() {
+    return state.cmdEntries
+        .map((cmd, index) => ({ cmd, index }))
+        .filter(({ cmd }) => isDuplicatePaletteSource(cmd));
+}
+
+function listDuplicatePaletteTargetIndexes(sourceIndex = state.paletteDuplicate.sourceCmdIndex) {
+    const source = state.cmdEntries[sourceIndex];
+    if (!isDuplicatePaletteSource(source)) return [];
+
+    return state.cmdEntries
+        .map((cmd, index) => ({ cmd, index }))
+        .filter(({ cmd }) => (
+            cmd.metadata.variant === "standard"
+            && cmd.metadata.paletteNumber >= 1
+            && cmd.metadata.paletteNumber <= 10
+            && cmd.metadata.paletteNumber !== source.metadata.paletteNumber
+            && duplicatePaletteScopeMatches(source, cmd)
+        ))
+        .map(({ index }) => index);
+}
+
 function resetSyncSelections() {
     const materials = listMaterialNames().filter(name => {
         const slots = listSlots(state.cmdEntries[0], name);
@@ -2306,6 +2388,17 @@ function resetSyncSelections() {
     state.patternSync.sourceSlotIndex = sourceIndex;
     state.patternSync.targetSlotIndexes = [];
     state.patternSync.targetCmdIndexes = state.cmdEntries.map((_, i) => i);
+
+    const duplicateSources = listDuplicatePaletteSourceIndexes();
+    const defaultDuplicateSource = duplicateSources.find(({ cmd }) => (
+        cmd.metadata.variant === "standard"
+        && cmd.metadata.paletteNumber === 1
+    )) || duplicateSources[0];
+    state.paletteDuplicate.sourceCmdIndex = defaultDuplicateSource?.index ?? null;
+    state.paletteDuplicate.targetCmdIndexes = defaultDuplicateSource
+        ? listDuplicatePaletteTargetIndexes(defaultDuplicateSource.index)
+        : [];
+    state.paletteDuplicate.undo = null;
 }
 
 function applyColorSync() {
@@ -2441,6 +2534,220 @@ function applyPatternSync() {
     updateExportButtons();
 
     return { results, applied, skippedDisabled };
+}
+
+
+// ============================================================
+// @anchor palette-duplicate
+// DUPLICATE PALETTE
+// ============================================================
+
+function rawSlotEnabled(cmd, slot) {
+    const offset = slot?.enable?.absoluteOffset;
+    const value = enabledAtOffset(cmd?.workingBuffer, offset, slot?.enable?.byteLength);
+    return value === null ? isSlotEnabled(slot) : value;
+}
+
+function buildPaletteDuplicatePlan(source, target) {
+    const operations = [];
+    let missingMaterials = 0;
+    let missingSlots = 0;
+    let skippedNonEditable = 0;
+
+    for (const sourceCluster of source.colorClusters ?? []) {
+        if (!sourceCluster.colors?.length) continue;
+
+        const targetCluster = getMaterial(target, sourceCluster.name);
+        if (!targetCluster) {
+            missingMaterials += sourceCluster.colors.filter(isSlotEditable).length;
+            continue;
+        }
+
+        for (const sourceSlot of sourceCluster.colors) {
+            if (!isSlotEditable(sourceSlot)) {
+                skippedNonEditable += 1;
+                continue;
+            }
+
+            const targetSlot = targetCluster.colors.find(slot => slot.index === sourceSlot.index);
+            if (!isSlotEditable(targetSlot)) {
+                missingSlots += 1;
+                continue;
+            }
+
+            operations.push({
+                materialName: sourceCluster.name,
+                sourceSlot,
+                targetSlot,
+                rgba: rgbaAtOffset(source.workingBuffer, sourceSlot.color.absoluteOffset),
+                enabled: rawSlotEnabled(source, sourceSlot),
+            });
+        }
+    }
+
+    return {
+        operations,
+        missingMaterials,
+        missingSlots,
+        skippedNonEditable,
+    };
+}
+
+function applyPaletteDuplicate() {
+    const source = state.cmdEntries[state.paletteDuplicate.sourceCmdIndex];
+    if (!isDuplicatePaletteSource(source)) {
+        throw new Error("Select a standard, EX, or DX source palette.");
+    }
+
+    const selectedTargetIndexes = state.paletteDuplicate.targetCmdIndexes
+        .filter(index => listDuplicatePaletteTargetIndexes(state.paletteDuplicate.sourceCmdIndex).includes(index));
+    if (!selectedTargetIndexes.length) {
+        throw new Error("Select at least one standard target palette.");
+    }
+
+    const targetPlans = selectedTargetIndexes
+        .map(index => ({ index, cmd: state.cmdEntries[index] }))
+        .filter(({ cmd }) => cmd)
+        .map(({ index, cmd }) => ({
+            index,
+            cmd,
+            plan: buildPaletteDuplicatePlan(source, cmd),
+        }));
+    const operationCount = targetPlans.reduce((total, entry) => total + entry.plan.operations.length, 0);
+    if (!operationCount) {
+        throw new Error("No matching editable color slots were found in the selected targets.");
+    }
+
+    const missingMaterials = targetPlans.reduce((total, entry) => total + entry.plan.missingMaterials, 0);
+    const missingSlots = targetPlans.reduce((total, entry) => total + entry.plan.missingSlots, 0);
+    const undoOperations = [];
+
+    let copied = 0;
+    let changed = 0;
+    let enableSkipped = 0;
+
+    for (const { index: cmdIndex, cmd, plan } of targetPlans) {
+        for (const operation of plan.operations) {
+            const targetOffset = operation.targetSlot.color.absoluteOffset;
+            const beforeRgba = rgbaAtOffset(cmd.workingBuffer, targetOffset);
+            const beforeEnabled = rawSlotEnabled(cmd, operation.targetSlot);
+            const enableOffset = operation.targetSlot.enable?.absoluteOffset;
+            const enableByteLength = operation.targetSlot.enable?.byteLength ?? 1;
+            const canSnapshotEnable = Number.isInteger(enableOffset)
+                && enableOffset >= 0
+                && enableOffset + enableByteLength <= cmd.workingBuffer.byteLength;
+            const beforeEnableBytes = canSnapshotEnable
+                ? Array.from(new Uint8Array(cmd.workingBuffer, enableOffset, enableByteLength))
+                : null;
+
+            writeRgbaAtOffset(cmd.workingBuffer, targetOffset, operation.rgba);
+            updateColorModelAtOffset(cmd, targetOffset, operation.rgba);
+
+            let enableChanged = false;
+            if (Number.isInteger(operation.targetSlot.enable?.absoluteOffset)) {
+                enableChanged = beforeEnabled !== operation.enabled;
+                writeEnableAtOffset(
+                    cmd.workingBuffer,
+                    operation.targetSlot.enable.absoluteOffset,
+                    operation.targetSlot.enable.byteLength ?? 1,
+                    operation.enabled,
+                );
+                operation.targetSlot.enabled = operation.enabled;
+                operation.targetSlot.enable.value = operation.enabled;
+            } else if (beforeEnabled !== operation.enabled) {
+                enableSkipped += 1;
+            }
+
+            copied += 1;
+            if (!rgbaEquals(beforeRgba, operation.rgba) || enableChanged) {
+                changed += 1;
+                undoOperations.push({
+                    cmdIndex,
+                    targetOffset,
+                    beforeRgba: beforeRgba.slice(),
+                    targetSlot: operation.targetSlot,
+                    enableOffset: canSnapshotEnable ? enableOffset : null,
+                    enableByteLength,
+                    beforeEnabled,
+                    beforeEnableBytes,
+                });
+            }
+        }
+    }
+
+    state.paletteDuplicate.undo = changed > 0
+        ? {
+            operations: undoOperations,
+            targets: targetPlans.length,
+        }
+        : null;
+    renderDuplicateUndoButton();
+
+    if (changed > 0) {
+        state.inspectorDirty = true;
+        updateInspectorDirtyUi();
+        renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
+        renderCurrentChanges();
+        renderSyncPanels();
+        updateExportButtons();
+    }
+
+    return {
+        copied,
+        changed,
+        targets: targetPlans.length,
+        missingMaterials,
+        missingSlots,
+        enableSkipped,
+    };
+}
+
+function renderDuplicateUndoButton() {
+    if (!duplicatePaletteUndoBtn) return;
+    const available = Boolean(state.paletteDuplicate.undo?.operations?.length);
+    duplicatePaletteUndoBtn.disabled = !available;
+    duplicatePaletteUndoBtn.classList.toggle("hidden", !available);
+}
+
+function undoLastPaletteDuplicate() {
+    const undo = state.paletteDuplicate.undo;
+    if (!undo?.operations?.length) return { changed: 0, targets: 0 };
+
+    let changed = 0;
+    for (const operation of undo.operations) {
+        const cmd = state.cmdEntries[operation.cmdIndex];
+        if (!cmd) continue;
+
+        const currentRgba = rgbaAtOffset(cmd.workingBuffer, operation.targetOffset);
+        const currentEnableBytes = operation.enableOffset !== null
+            ? Array.from(new Uint8Array(cmd.workingBuffer, operation.enableOffset, operation.enableByteLength))
+            : null;
+        const enableChanged = operation.beforeEnableBytes !== null
+            && !currentEnableBytes.every((value, index) => value === operation.beforeEnableBytes[index]);
+
+        writeRgbaAtOffset(cmd.workingBuffer, operation.targetOffset, operation.beforeRgba);
+        updateColorModelAtOffset(cmd, operation.targetOffset, operation.beforeRgba);
+
+        if (operation.enableOffset !== null && operation.beforeEnableBytes !== null) {
+            new Uint8Array(cmd.workingBuffer).set(operation.beforeEnableBytes, operation.enableOffset);
+            operation.targetSlot.enabled = operation.beforeEnabled;
+            if (operation.targetSlot.enable) operation.targetSlot.enable.value = operation.beforeEnabled;
+        }
+
+        if (!rgbaEquals(currentRgba, operation.beforeRgba) || enableChanged) changed += 1;
+    }
+
+    state.paletteDuplicate.undo = null;
+    state.inspectorDirty = state.cmdEntries.some(cmd => (
+        diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
+    ));
+    updateInspectorDirtyUi();
+    renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+
+    return { changed, targets: undo.targets };
 }
 
 
@@ -3223,6 +3530,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
     const changedCmds = [];
 
     for (const cmd of state.cmdEntries) {
+        if (colorsOnly && isReferenceCmdMetadata(cmd.metadata)) continue;
         const baseline = exportBaseline(cmd);
         const semanticChanges = semanticChangesSince(cmd, baseline);
         const changed = diffBuffers(baseline, cmd.workingBuffer).length > 0;
@@ -4006,13 +4314,13 @@ function renderFileSummary() {
     state.cmdEntries.forEach((cmd, index) => {
         const row = document.createElement("div");
         row.className = "file-list-item";
-        if (cmd.metadata.isDxReference) row.classList.add("dx-reference");
+        if (isReferenceCmdMetadata(cmd.metadata)) row.classList.add("dx-reference");
         row.innerHTML =
             `<strong>${cmdDisplayName(cmd)}</strong>`
             + `<span>${cmd.file.name} · ${formatBytes(cmd.file.size)}</span>`
             + `<span>${cmd.colorClusters.length} materials</span>`
-            + (cmd.metadata.isDxReference
-                ? `<span class="dx-reference-note">DX reference only · edits may not apply in-game</span>`
+            + (isReferenceCmdMetadata(cmd.metadata)
+                ? `<span class="dx-reference-note">${cmd.metadata.variant.toUpperCase()} reference only · edits may not apply in-game</span>`
                 : "");
         const unload = document.createElement("button");
         unload.type = "button";
@@ -4540,18 +4848,20 @@ function renderActiveCmdControls() {
 function updateDxReferenceWarning() {
     if (!dxReferenceWarning) return;
 
-    const dxCmds = state.cmdEntries.filter(cmd => cmd.metadata.isDxReference);
-    if (!dxCmds.length) {
+    const referenceCmds = state.cmdEntries.filter(cmd => isReferenceCmdMetadata(cmd.metadata));
+    if (!referenceCmds.length) {
         dxReferenceWarning.classList.add("hidden");
         dxReferenceWarning.textContent = "";
         return;
     }
 
-    const activeIsDx = state.cmdEntries[state.activeCmdIndex]?.metadata.isDxReference;
+    const activeReference = state.cmdEntries[state.activeCmdIndex];
+    const activeIsReference = isReferenceCmdMetadata(activeReference?.metadata);
+    const referenceVariants = [...new Set(referenceCmds.map(cmd => cmd.metadata.variant.toUpperCase()))].join("/");
     dxReferenceWarning.classList.remove("hidden");
-    dxReferenceWarning.innerHTML = activeIsDx
-        ? `<strong>DX reference file:</strong> Edits may not apply in-game. Use this file as reference only.`
-        : `<strong>DX files loaded:</strong> Their edits may not apply in-game. Use DX files as reference only.`;
+    dxReferenceWarning.innerHTML = activeIsReference
+        ? `<strong>${activeReference.metadata.variant.toUpperCase()} reference file:</strong> Edits may not apply in-game. Use this file as reference only.`
+        : `<strong>${referenceVariants} files loaded:</strong> Their edits may not apply in-game. Use them as reference only.`;
 }
 
 function stepActiveCmd(delta) {
@@ -4560,12 +4870,15 @@ function stepActiveCmd(delta) {
     loadActiveCmd((state.activeCmdIndex + delta + total) % total);
 }
 
-function createActiveCmdStepButton(direction) {
+function createActiveCmdStepButton(direction, {
+    label = "active color",
+    onStep = stepActiveCmd,
+} = {}) {
     const isPrevious = direction < 0;
     const button = document.createElement("button");
     button.type = "button";
     button.className = `active-cmd-step active-cmd-step-${isPrevious ? "previous" : "next"}`;
-    button.setAttribute("aria-label", `${isPrevious ? "Previous" : "Next"} active color`);
+    button.setAttribute("aria-label", `${isPrevious ? "Previous" : "Next"} ${label}`);
     button.innerHTML = isPrevious
         ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5 9 12l5.5 5.5"/></svg>'
         : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg>';
@@ -4574,25 +4887,25 @@ function createActiveCmdStepButton(direction) {
         if (!event.isPrimary || event.button !== 0 || button.disabled) return;
         event.preventDefault();
         event.stopPropagation();
-        stepActiveCmd(direction);
+        onStep(direction);
     });
     button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        if (event.detail === 0 && !button.disabled) stepActiveCmd(direction);
+        if (event.detail === 0 && !button.disabled) onStep(direction);
     });
     return button;
 }
 
-function ensureActiveCmdStepper(select) {
+function ensureActiveCmdStepper(select, options = {}) {
     if (!select) return null;
     const existing = select.closest(".active-cmd-stepper");
     if (existing) return existing;
 
     const stepper = document.createElement("div");
     stepper.className = "active-cmd-stepper";
-    const previous = createActiveCmdStepButton(-1);
-    const next = createActiveCmdStepButton(1);
+    const previous = createActiveCmdStepButton(-1, options);
+    const next = createActiveCmdStepButton(1, options);
     select.before(stepper);
     stepper.append(previous, select, next);
     return stepper;
@@ -5133,11 +5446,24 @@ function buildTargetSlotList(container, {
 function buildCmdCheckList(container, {
     selectedIndexes,
     onChange,
+    filter = () => true,
 }) {
     if (!container) return;
     container.innerHTML = "";
 
-    state.cmdEntries.forEach((cmd, index) => {
+    const candidates = state.cmdEntries
+        .map((cmd, index) => ({ cmd, index }))
+        .filter(({ cmd, index }) => filter(cmd, index));
+
+    if (!candidates.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted-inline sync-empty-note";
+        empty.textContent = "No matching CMD palettes loaded.";
+        container.appendChild(empty);
+        return;
+    }
+
+    candidates.forEach(({ cmd, index }) => {
         const label = document.createElement("label");
         label.className = "target-cmd-item";
 
@@ -5157,6 +5483,110 @@ function buildCmdCheckList(container, {
         label.append(check, text);
         container.appendChild(label);
     });
+}
+
+function renderDuplicateSourceDropdown() {
+    const select = duplicateSourceCmdSelect;
+    if (!select) return;
+
+    const candidates = listDuplicatePaletteSourceIndexes();
+    const stepper = ensureActiveCmdStepper(select, {
+        label: "source palette",
+        onStep: stepDuplicateSource,
+    });
+
+    const trigger = select.querySelector(".custom-select-trigger");
+    const dropdown = select.querySelector(".custom-select-dropdown");
+    const text = trigger?.querySelector(".cs-text");
+    if (!trigger || !dropdown) return;
+
+    const selected = candidates.find(({ index }) => index === state.paletteDuplicate.sourceCmdIndex)
+        || candidates.find(({ cmd }) => (
+            cmd.metadata.variant === "standard"
+            && cmd.metadata.paletteNumber === 1
+        ))
+        || candidates[0]
+        || null;
+
+    if (selected && selected.index !== state.paletteDuplicate.sourceCmdIndex) {
+        state.paletteDuplicate.sourceCmdIndex = selected.index;
+    }
+
+    trigger.disabled = !selected;
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.classList.remove("open");
+    if (text) text.textContent = selected ? cmdDisplayName(selected.cmd) : "No source palettes loaded";
+
+    const previous = stepper?.querySelector(".active-cmd-step-previous");
+    const next = stepper?.querySelector(".active-cmd-step-next");
+    const selectedPosition = selected
+        ? candidates.findIndex(({ index }) => index === selected.index)
+        : -1;
+    const canStep = candidates.length > 1 && selectedPosition >= 0;
+    if (previous) {
+        previous.disabled = !canStep;
+        const previousCandidate = canStep
+            ? candidates[(selectedPosition - 1 + candidates.length) % candidates.length]
+            : null;
+        previous.title = previousCandidate
+            ? `Previous: ${cmdDisplayName(previousCandidate.cmd)}`
+            : "Previous source palette";
+    }
+    if (next) {
+        next.disabled = !canStep;
+        const nextCandidate = canStep
+            ? candidates[(selectedPosition + 1) % candidates.length]
+            : null;
+        next.title = nextCandidate
+            ? `Next: ${cmdDisplayName(nextCandidate.cmd)}`
+            : "Next source palette";
+    }
+
+    dropdown.innerHTML = "";
+    for (const candidate of candidates) {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.className = "custom-select-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(candidate.index === state.paletteDuplicate.sourceCmdIndex));
+        const referenceVariant = candidate.cmd.metadata.variant === "standard"
+            ? ""
+            : ` - ${candidate.cmd.metadata.variant.toUpperCase()} reference`;
+        option.textContent = cmdDisplayName(candidate.cmd) + referenceVariant;
+        if (candidate.index === state.paletteDuplicate.sourceCmdIndex) option.classList.add("selected");
+        option.addEventListener("click", () => {
+            state.paletteDuplicate.sourceCmdIndex = candidate.index;
+            state.paletteDuplicate.targetCmdIndexes = listDuplicatePaletteTargetIndexes(candidate.index);
+            dropdown.classList.add("hidden");
+            trigger.classList.remove("open");
+            trigger.setAttribute("aria-expanded", "false");
+            renderSyncPanels();
+        });
+        dropdown.appendChild(option);
+    }
+
+    trigger.onclick = event => {
+        event.stopPropagation();
+        const open = dropdown.classList.toggle("hidden") === false;
+        trigger.classList.toggle("open", open);
+        trigger.setAttribute("aria-expanded", String(open));
+    };
+}
+
+function stepDuplicateSource(delta) {
+    const candidates = listDuplicatePaletteSourceIndexes();
+    if (candidates.length < 2) return;
+
+    const currentPosition = candidates.findIndex(({ index }) => (
+        index === state.paletteDuplicate.sourceCmdIndex
+    ));
+    const nextPosition = currentPosition < 0
+        ? 0
+        : (currentPosition + delta + candidates.length) % candidates.length;
+    const next = candidates[nextPosition];
+    state.paletteDuplicate.sourceCmdIndex = next.index;
+    state.paletteDuplicate.targetCmdIndexes = listDuplicatePaletteTargetIndexes(next.index);
+    renderSyncPanels();
 }
 
 function getCommonColorsForCmd(cmdEntry, limit = 4) {
@@ -5292,6 +5722,8 @@ function renderSyncPanels() {
         ?.classList.toggle("hidden", state.syncMode !== "color");
     document.querySelector("#pattern-sync-pane")
         ?.classList.toggle("hidden", state.syncMode !== "pattern");
+    document.querySelector("#duplicate-palette-pane")
+        ?.classList.toggle("hidden", state.syncMode !== "duplicate");
 
     // ---- Color Sync (active CMD only)
     const cs = state.colorSync;
@@ -5454,6 +5886,38 @@ function renderSyncPanels() {
             ps.targetCmdIndexes = indexes;
         },
     });
+
+    // ---- Duplicate Palette
+    renderDuplicateSourceDropdown();
+    const duplicate = state.paletteDuplicate;
+    const duplicateSource = state.cmdEntries[duplicate.sourceCmdIndex];
+    const duplicateTargetIndexes = listDuplicatePaletteTargetIndexes(duplicate.sourceCmdIndex);
+    duplicate.targetCmdIndexes = duplicate.targetCmdIndexes.filter(index => duplicateTargetIndexes.includes(index));
+
+    const duplicateNote = document.querySelector("#duplicate-palette-note");
+    if (duplicateNote) {
+        if (!duplicateSource) {
+            duplicateNote.textContent = "Load a standard, EX, or DX palette as the source, then choose standard target palettes.";
+        } else if (duplicateSource.metadata.variant !== "standard") {
+            duplicateNote.textContent = `${duplicateSource.metadata.variant.toUpperCase()} source selected. Its raw colors and Enable states will be copied as reference data; EX/DX files cannot be targets.`;
+        } else {
+            duplicateNote.textContent = "Copies every matching editable material color and Enable state into the selected standard palettes.";
+        }
+    }
+
+    buildCmdCheckList(document.querySelector("#duplicate-target-cmds"), {
+        selectedIndexes: duplicate.targetCmdIndexes,
+        filter: (cmd, index) => duplicateTargetIndexes.includes(index),
+        onChange: indexes => {
+            duplicate.targetCmdIndexes = indexes;
+        },
+    });
+
+    const duplicateButton = document.querySelector("#apply-duplicate-palette");
+    if (duplicateButton) {
+        duplicateButton.disabled = !duplicateSource || duplicate.targetCmdIndexes.length === 0;
+    }
+    renderDuplicateUndoButton();
 }
 
 
@@ -5765,6 +6229,20 @@ function bindUi() {
             renderSyncPanels();
         });
 
+    document.querySelector("#duplicate-target-select-all")
+        ?.addEventListener("click", () => {
+            state.paletteDuplicate.targetCmdIndexes = listDuplicatePaletteTargetIndexes(
+                state.paletteDuplicate.sourceCmdIndex,
+            );
+            renderSyncPanels();
+        });
+
+    document.querySelector("#duplicate-target-select-none")
+        ?.addEventListener("click", () => {
+            state.paletteDuplicate.targetCmdIndexes = [];
+            renderSyncPanels();
+        });
+
     // source color edit (color sync only — writes active CMD source slot)
     document.querySelector("#color-source-color-hex")
         ?.addEventListener("change", e => {
@@ -5852,6 +6330,45 @@ function bindUi() {
                 showStatus(applyStatus, "bad", error.message || String(error));
             }
         });
+
+    document.querySelector("#apply-duplicate-palette")
+        ?.addEventListener("click", () => {
+            try {
+                const result = applyPaletteDuplicate();
+                let message =
+                    `Duplicate Palette copied ${result.copied} slot${result.copied === 1 ? "" : "s"}`
+                    + ` across ${result.targets} target palette${result.targets === 1 ? "" : "s"}.`;
+                if (result.missingMaterials || result.missingSlots) {
+                    message += ` Skipped ${result.missingMaterials + result.missingSlots} unmatched slot${result.missingMaterials + result.missingSlots === 1 ? "" : "s"}.`;
+                }
+                if (result.enableSkipped) {
+                    message += ` ${result.enableSkipped} Enable state${result.enableSkipped === 1 ? "" : "s"} could not be represented by the target structure.`;
+                }
+                showStatus(applyStatus, "good", message);
+            } catch (error) {
+                console.error(error);
+                showStatus(applyStatus, "bad", error.message || String(error));
+            }
+        });
+
+    duplicatePaletteUndoBtn?.addEventListener("click", () => {
+        try {
+            const result = undoLastPaletteDuplicate();
+            if (!result.changed) {
+                showStatus(applyStatus, "warn", "There is no Duplicate Palette operation to undo.");
+                return;
+            }
+            showStatus(
+                applyStatus,
+                "good",
+                `Undid Duplicate Palette and restored ${result.changed} slot${result.changed === 1 ? "" : "s"}`
+                + ` across ${result.targets} target palette${result.targets === 1 ? "" : "s"}.`,
+            );
+        } catch (error) {
+            console.error(error);
+            showStatus(applyStatus, "bad", error.message || String(error));
+        }
+    });
 
     exportCmdButton?.addEventListener("click", async () => {
         try {
