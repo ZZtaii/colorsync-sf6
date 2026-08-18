@@ -304,6 +304,7 @@ const modAuthorInput = document.querySelector("#mod-author");
 const zipFileNameInput = document.querySelector("#zip-file-name");
 const zipFileNameField = zipFileNameInput?.closest("label");
 const zipTargetReminder = document.querySelector("#zip-target-reminder");
+const includeColorBackupsInput = document.querySelector("#include-color-backups");
 
 const screenshotDropZone = document.querySelector("#screenshot-drop-zone");
 const screenshotFileInput = document.querySelector("#screenshot-file");
@@ -555,6 +556,11 @@ function applyPersistedUiState() {
     }
     if (replaceDuplicateExportsInput && typeof saved.replaceDuplicateExports === "boolean") {
         replaceDuplicateExportsInput.checked = saved.replaceDuplicateExports;
+    }
+    if (includeColorBackupsInput) {
+        includeColorBackupsInput.checked = typeof saved.includeColorBackups === "boolean"
+            ? saved.includeColorBackups
+            : true;
     }
     const pickerBounds = saved.colorPickerBounds;
     if (
@@ -3189,6 +3195,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
     if (colorsOnly && !state.importedMod) {
         throw new Error("Load a mod ZIP before exporting a colors-only ZIP.");
     }
+    const includeColorBackups = includeColorBackupsInput?.checked !== false;
     const modinfoPath = state.importedMod?.modinfoPath || "modinfo.ini";
     const modRoot = zipEntryDirectory(modinfoPath);
     const files = colorsOnly
@@ -3199,6 +3206,18 @@ async function buildModZip({ colorsOnly = false } = {}) {
         : state.importedMod
             ? { ...state.importedMod.entries }
             : {};
+
+    if (!includeColorBackups) {
+        for (const path of Object.keys(files)) {
+            if (
+                path.toLowerCase().startsWith(modRoot.toLowerCase())
+                && isColorBackupPath(path)
+            ) {
+                delete files[path];
+            }
+        }
+    }
+
     const exported = [];
     const includedCmds = [];
     const changedCmds = [];
@@ -3250,7 +3269,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
         files[screenshotEntry] = shotBuf;
     }
 
-    {
+    if (includeColorBackups) {
         const createdAt = new Date().toISOString();
         const originalSources = state.importedMod
             ? (colorsOnly ? includedCmds : state.cmdEntries.map(cmd => ({ cmd, paths: importedCmdPaths(cmd) })))
@@ -6097,6 +6116,10 @@ function bindUi() {
 
     replaceDuplicateExportsInput?.addEventListener("change", () => {
         saveUiState({ replaceDuplicateExports: replaceDuplicateExportsInput.checked });
+    });
+
+    includeColorBackupsInput?.addEventListener("change", () => {
+        saveUiState({ includeColorBackups: includeColorBackupsInput.checked });
     });
 
     document.querySelectorAll("[data-jump]").forEach(link => {

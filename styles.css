@@ -5631,6 +5631,14 @@ main.page-width {
     }
 }
 
+.export-backup-option {
+    margin-top: 18px;
+}
+
+.export-backup-hint {
+    margin-left: 25px;
+}
+
 /* ============================================================
    MOD ZIP EDITING TARGET PICKER
    ============================================================ */
