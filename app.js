@@ -126,6 +126,21 @@ const CMD_NAME_RE =
 const CMD_VARIANT_ORDER = { standard: 0, ex: 1, dx: 2 };
 const MAX_MOD_ZIP_BYTES = 200 * 1024 * 1024;
 const MAX_MOD_UNPACKED_BYTES = 750 * 1024 * 1024;
+const SURPRISE_PRESETS = [
+    { id: "random", label: "Random" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+    { id: "pastel", label: "Pastel" },
+    { id: "neon", label: "Neon" },
+    { id: "warm", label: "Warm" },
+    { id: "cool", label: "Cool" },
+];
+const SURPRISE_DEFAULTS = {
+    preset: "random",
+    intensity: 1,
+    targetMode: "material",
+    targets: [],
+};
 
 
 // ============================================================
@@ -149,6 +164,10 @@ const state = {
     // moves between loaded CMD palettes.
     openClusterNames: new Set(),
     surpriseSnapshots: new Map(),
+    surpriseConfig: {
+        ...SURPRISE_DEFAULTS,
+        targets: [],
+    },
 
     inspectorDirty: false,
 
@@ -212,6 +231,16 @@ const colorPickerState = {
     resizingWindow: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
+};
+
+const surpriseMenuState = {
+    open: false,
+    anchor: null,
+    cluster: null,
+    targetPickerOpen: false,
+    targetListCollapsed: false,
+    resetMenuOpen: false,
+    expandedMaterials: new Set(),
 };
 
 
@@ -370,6 +399,26 @@ const colorPickerRuntimeInfo = document.querySelector(".color-picker-runtime-inf
 const colorPickerRuntimeTooltip = document.querySelector("#color-picker-runtime-tooltip");
 const colorPickerResetLayout = document.querySelector("#color-picker-reset-layout");
 const colorPickerResize = document.querySelector("#color-picker-resize");
+const surpriseMenu = document.querySelector("#surprise-menu");
+const surpriseMenuSummary = document.querySelector("#surprise-menu-summary");
+const surpriseMenuClose = document.querySelector("#surprise-menu-close");
+const surprisePresetGrid = document.querySelector("#surprise-preset-grid");
+const surpriseIntensity = document.querySelector("#surprise-intensity");
+const surpriseIntensityValue = document.querySelector("#surprise-intensity-value");
+const surpriseTargetSummary = document.querySelector("#surprise-target-summary");
+const surpriseEditTargets = document.querySelector("#surprise-edit-targets");
+const surpriseTargetPicker = document.querySelector("#surprise-target-picker");
+const surpriseTargetListToggle = document.querySelector("#surprise-target-list-toggle");
+const surpriseTargetList = document.querySelector("#surprise-target-list");
+const surpriseTargetSelectAll = document.querySelector("#surprise-target-select-all");
+const surpriseTargetSelectNone = document.querySelector("#surprise-target-select-none");
+const surpriseApply = document.querySelector("#surprise-apply");
+const surpriseResetGroup = document.querySelector("#surprise-reset-group");
+const surpriseResetColors = document.querySelector("#surprise-reset-colors");
+const surpriseResetMore = document.querySelector("#surprise-reset-more");
+const surpriseResetMenu = document.querySelector("#surprise-reset-menu");
+const surpriseResetAll = document.querySelector("#surprise-reset-all");
+const surpriseResetSettings = document.querySelector("#surprise-reset-settings");
 
 
 // ============================================================
@@ -550,8 +599,43 @@ function saveUiState(patch) {
     }
 }
 
+function normalizeSurpriseConfig(saved) {
+    const source = saved && typeof saved === "object" ? saved : {};
+    const preset = SURPRISE_PRESETS.some(option => option.id === source.preset)
+        ? source.preset
+        : SURPRISE_DEFAULTS.preset;
+    const intensity = Number.isFinite(source.intensity)
+        ? Math.max(0, Math.min(1, Number(source.intensity)))
+        : SURPRISE_DEFAULTS.intensity;
+    // Targeting belongs to the currently loaded CMD set. Never restore it
+    // across a page refresh, where the material layout may be unrelated.
+    return { preset, intensity, targetMode: SURPRISE_DEFAULTS.targetMode, targets: [] };
+}
+
+function saveSurpriseConfig() {
+    saveUiState({
+        surpriseConfig: {
+            preset: state.surpriseConfig.preset,
+            intensity: state.surpriseConfig.intensity,
+        },
+    });
+}
+
+function resetSurpriseTargeting() {
+    state.surpriseConfig.targetMode = SURPRISE_DEFAULTS.targetMode;
+    state.surpriseConfig.targets = [];
+    surpriseMenuState.targetPickerOpen = false;
+    surpriseMenuState.resetMenuOpen = false;
+    surpriseMenuState.expandedMaterials.clear();
+}
+
 function applyPersistedUiState() {
     const saved = loadUiState();
+
+    state.surpriseConfig = normalizeSurpriseConfig(saved.surpriseConfig);
+    if (typeof saved.surpriseTargetListCollapsed === "boolean") {
+        surpriseMenuState.targetListCollapsed = saved.surpriseTargetListCollapsed;
+    }
 
     if (typeof saved.referenceMinimized === "boolean") {
         state.referenceMinimized = saved.referenceMinimized;
@@ -1623,6 +1707,7 @@ function resetLoadedCmdState() {
     state.colorClusters = [];
     state.openClusterNames.clear();
     state.surpriseSnapshots.clear();
+    resetSurpriseTargeting();
     state.inspectorDirty = false;
     state.detectedEsfId = null;
     state.detectedCharacterName = null;
@@ -2807,6 +2892,7 @@ function revertChange(cmdIndex, offset) {
     const original = rgbaAtOffset(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, offset);
     writeRgbaAtOffset(cmd.workingBuffer, offset, original);
     updateColorModelAtOffset(cmd, offset, original);
+    removeSurpriseSnapshotSlot(cmd, offset);
 
     renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
     renderCurrentChanges();
@@ -3098,6 +3184,7 @@ function revertAllChanges() {
         }
     }
 
+    state.surpriseSnapshots.clear();
     state.inspectorDirty = false;
     updateInspectorDirtyUi();
     renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
@@ -4755,6 +4842,9 @@ async function unloadCmd(index) {
     const cmd = state.cmdEntries[index];
     if (!cmd) return;
 
+    closeSurpriseMenu();
+    resetSurpriseTargeting();
+    state.surpriseSnapshots.delete(cmd);
     state.cmdEntries.splice(index, 1);
     state.files.splice(index, 1);
     state.rejectedFiles = [];
@@ -4972,75 +5062,671 @@ function renderActiveCmdDropdown(select) {
     updateInspectorDirtyUi();
 }
 
-function randomRgbKeepingAlpha(color) {
-    const current = slotRgba(color) ?? [0, 0, 0, 255];
-    const rgb = new Uint8Array(3);
-    if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(rgb);
-    else rgb.forEach((_, index) => { rgb[index] = Math.floor(Math.random() * 256); });
-    if (rgb[0] === current[0] && rgb[1] === current[1] && rgb[2] === current[2]) {
-        rgb[0] = (rgb[0] + 1) % 256;
+function surpriseRandomUnit() {
+    if (globalThis.crypto?.getRandomValues) {
+        const value = new Uint32Array(1);
+        crypto.getRandomValues(value);
+        return value[0] / 0x100000000;
     }
-    return [rgb[0], rgb[1], rgb[2], current[3]];
+    return Math.random();
 }
 
-function surpriseMaterialColors(cluster) {
-    const cmd = state.cmdEntries[state.activeCmdIndex];
-    if (!cmd || !cluster) return 0;
-    const activeSlots = cluster.colors.filter(color => isSlotEnabled(color) && isSlotEditable(color));
-    let cmdSnapshots = state.surpriseSnapshots.get(cmd);
-    if (!cmdSnapshots) {
-        cmdSnapshots = new Map();
-        state.surpriseSnapshots.set(cmd, cmdSnapshots);
+function surpriseRandomBetween(min, max) {
+    return min + (max - min) * surpriseRandomUnit();
+}
+
+function randomThemeRgbKeepingAlpha(color, preset) {
+    const current = slotRgba(color) ?? [0, 0, 0, 255];
+    if (preset === "random") {
+        return [
+            Math.floor(surpriseRandomUnit() * 256),
+            Math.floor(surpriseRandomUnit() * 256),
+            Math.floor(surpriseRandomUnit() * 256),
+            current[3],
+        ];
     }
-    if (!cmdSnapshots.has(cluster.name)) {
-        cmdSnapshots.set(cluster.name, {
-            inspectorDirty: state.inspectorDirty,
-            slots: activeSlots.map(color => ({
-                offset: color.color.absoluteOffset,
-                rgba: slotRgba(color),
-            })),
+
+    let h = surpriseRandomBetween(0, 360);
+    let s = surpriseRandomBetween(0.25, 0.85);
+    let v = surpriseRandomBetween(0.4, 0.9);
+
+    if (preset === "light") {
+        s = surpriseRandomBetween(0.12, 0.55);
+        v = surpriseRandomBetween(0.78, 1);
+    } else if (preset === "dark") {
+        s = surpriseRandomBetween(0.22, 0.9);
+        v = surpriseRandomBetween(0.08, 0.34);
+    } else if (preset === "pastel") {
+        s = surpriseRandomBetween(0.18, 0.48);
+        v = surpriseRandomBetween(0.82, 1);
+    } else if (preset === "neon") {
+        s = surpriseRandomBetween(0.82, 1);
+        v = surpriseRandomBetween(0.78, 1);
+    } else if (preset === "warm") {
+        // Wrap across red so warm colors span reds, oranges, and yellows.
+        h = (345 + surpriseRandomBetween(0, 80)) % 360;
+        s = surpriseRandomBetween(0.48, 0.95);
+        v = surpriseRandomBetween(0.48, 1);
+    } else if (preset === "cool") {
+        h = surpriseRandomBetween(150, 285);
+        s = surpriseRandomBetween(0.42, 0.92);
+        v = surpriseRandomBetween(0.42, 1);
+    }
+
+    return [...hsvToRgb(h, s, v), current[3]];
+}
+
+function mixSurpriseRgb(current, target, intensity) {
+    const rgba = [
+        Math.round(current[0] + (target[0] - current[0]) * intensity),
+        Math.round(current[1] + (target[1] - current[1]) * intensity),
+        Math.round(current[2] + (target[2] - current[2]) * intensity),
+        current[3],
+    ];
+    if (
+        intensity > 0
+        && rgba[0] === current[0]
+        && rgba[1] === current[1]
+        && rgba[2] === current[2]
+    ) {
+        rgba[0] = rgba[0] < 250 ? rgba[0] + 1 : rgba[0] - 1;
+    }
+    return rgba;
+}
+
+function surpriseColorForSlot(color) {
+    const current = slotRgba(color) ?? [0, 0, 0, 255];
+    const { preset, intensity } = state.surpriseConfig;
+    if (intensity <= 0) return current;
+    return mixSurpriseRgb(current, randomThemeRgbKeepingAlpha(color, preset), intensity);
+}
+
+function surpriseTargetKey(materialName, slotIndex) {
+    return `${materialName}\u0000${slotIndex}`;
+}
+
+function findSurpriseCluster(cmd, materialName) {
+    return cmd?.colorClusters?.find(cluster => cluster.name === materialName) ?? null;
+}
+
+function activeEditableSurpriseSlots(cluster) {
+    return (cluster?.colors ?? []).filter(color => isSlotEnabled(color) && isSlotEditable(color));
+}
+
+function getSurpriseTargets(cluster, cmd = state.cmdEntries[state.activeCmdIndex]) {
+    if (!cmd) return [];
+    if (state.surpriseConfig.targetMode === "selected") {
+        const seen = new Set();
+        return state.surpriseConfig.targets.flatMap(target => {
+            const targetCluster = findSurpriseCluster(cmd, target.materialName);
+            const color = targetCluster?.colors?.find(slot => slot.index === target.slotIndex);
+            const key = surpriseTargetKey(target.materialName, target.slotIndex);
+            if (!color || !isSlotEnabled(color) || !isSlotEditable(color) || seen.has(key)) return [];
+            seen.add(key);
+            return [{ cluster: targetCluster, color }];
         });
     }
-    for (const color of activeSlots) {
-        const rgba = randomRgbKeepingAlpha(color);
-        writeRgbaAtOffset(cmd.workingBuffer, color.color.absoluteOffset, rgba);
-        updateColorModelAtOffset(cmd, color.color.absoluteOffset, rgba);
-    }
-    if (!activeSlots.length) return 0;
+    const targetCluster = findSurpriseCluster(cmd, cluster?.name);
+    return activeEditableSurpriseSlots(targetCluster).map(color => ({
+        cluster: targetCluster,
+        color,
+    }));
+}
 
-    state.inspectorDirty = true;
+function currentSurpriseTargetCount() {
+    return getSurpriseTargets(surpriseMenuState.cluster).length;
+}
+
+function recomputeInspectorDirty() {
+    state.inspectorDirty = state.cmdEntries.some(cmd => (
+        diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
+    ));
+}
+
+function removeSurpriseSnapshotSlot(cmd, offset) {
+    const cmdSnapshots = state.surpriseSnapshots.get(cmd);
+    if (!cmdSnapshots) return;
+    for (const [materialName, snapshot] of cmdSnapshots) {
+        snapshot.slots = snapshot.slots.filter(slot => slot.offset !== offset);
+        if (!snapshot.slots.length) cmdSnapshots.delete(materialName);
+    }
+    if (!cmdSnapshots.size) state.surpriseSnapshots.delete(cmd);
+}
+
+function isSurpriseSnapshotSlotRestorable(cmd, slot) {
+    return Boolean(
+        cmd
+        && slot?.lastSurpriseRgba
+        && rgbaEquals(rgbaAtOffset(cmd.workingBuffer, slot.offset), slot.lastSurpriseRgba)
+    );
+}
+
+function hasRestorableSurpriseSlots(cmd, snapshot) {
+    return Boolean(snapshot?.slots?.some(slot => isSurpriseSnapshotSlotRestorable(cmd, slot)));
+}
+
+function updateSurpriseButtonStates() {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    document.querySelectorAll(".cluster-surprise-button").forEach(button => {
+        const cluster = findSurpriseCluster(cmd, button.dataset.clusterName);
+        const hasTargets = state.surpriseConfig.targetMode === "selected"
+            ? getSurpriseTargets(null, cmd).length > 0
+            : activeEditableSurpriseSlots(cluster).length > 0;
+        const enabled = state.surpriseConfig.intensity > 0 && hasTargets;
+        button.disabled = !enabled;
+        button.title = state.surpriseConfig.targetMode === "selected"
+            ? "Randomize the selected active material slots"
+            : "Randomize active colors in this material";
+        button.setAttribute("aria-label", state.surpriseConfig.targetMode === "selected"
+            ? "Surprise Me: randomize the selected active material slots"
+            : `Surprise Me: randomize active colors in ${button.dataset.clusterName}`);
+    });
+}
+
+function renderSurpriseTargetList() {
+    if (!surpriseTargetList) return;
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const previousScrollTop = surpriseTargetList.scrollTop;
+    surpriseTargetList.innerHTML = "";
+    if (!cmd?.colorClusters?.length) {
+        const empty = document.createElement("span");
+        empty.className = "muted-inline";
+        empty.textContent = "Load a CMD palette to choose target slots.";
+        surpriseTargetList.appendChild(empty);
+        return;
+    }
+
+    const selected = new Set(state.surpriseConfig.targets.map(target => (
+        surpriseTargetKey(target.materialName, target.slotIndex)
+    )));
+
+    for (const cluster of cmd.colorClusters) {
+        const material = document.createElement("div");
+        material.className = "surprise-target-material";
+        const editableSlots = activeEditableSurpriseSlots(cluster);
+        const selectedCount = editableSlots.filter(color => (
+            selected.has(surpriseTargetKey(cluster.name, color.index))
+        )).length;
+        const expanded = surpriseMenuState.expandedMaterials.has(cluster.name);
+
+        const heading = document.createElement("div");
+        heading.className = "surprise-target-material-header";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "surprise-target-material-toggle";
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${cluster.name} slots`);
+        toggle.textContent = expanded ? "▾" : "▸";
+        toggle.addEventListener("click", event => {
+            event.stopPropagation();
+            if (expanded) surpriseMenuState.expandedMaterials.delete(cluster.name);
+            else surpriseMenuState.expandedMaterials.add(cluster.name);
+            renderSurpriseTargetList();
+            if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+        });
+
+        const materialLabel = document.createElement("label");
+        materialLabel.className = "surprise-target-material-select";
+        const materialCheck = document.createElement("input");
+        materialCheck.type = "checkbox";
+        materialCheck.checked = editableSlots.length > 0 && selectedCount === editableSlots.length;
+        materialCheck.indeterminate = selectedCount > 0 && selectedCount < editableSlots.length;
+        materialCheck.disabled = editableSlots.length === 0;
+        materialCheck.setAttribute("aria-label", `Select all active slots in ${cluster.name}`);
+        materialCheck.addEventListener("change", () => {
+            const next = new Map(state.surpriseConfig.targets.map(target => [
+                surpriseTargetKey(target.materialName, target.slotIndex),
+                target,
+            ]));
+            for (const color of editableSlots) {
+                const key = surpriseTargetKey(cluster.name, color.index);
+                if (materialCheck.checked) next.set(key, { materialName: cluster.name, slotIndex: color.index });
+                else next.delete(key);
+            }
+            state.surpriseConfig.targets = [...next.values()];
+            renderSurpriseMenu();
+        });
+
+        const materialName = document.createElement("strong");
+        materialName.className = "surprise-target-material-name";
+        materialName.textContent = cluster.name;
+        const materialCount = document.createElement("small");
+        materialCount.textContent = editableSlots.length
+            ? `${selectedCount}/${editableSlots.length} active slots`
+            : "No active slots";
+        materialLabel.append(materialCheck, materialName, materialCount);
+        heading.append(toggle, materialLabel);
+        material.appendChild(heading);
+
+        if (!expanded) {
+            surpriseTargetList.appendChild(material);
+            continue;
+        }
+
+        const slots = document.createElement("div");
+        slots.className = "surprise-target-material-slots";
+
+        for (const color of cluster.colors) {
+            const editable = isSlotEnabled(color) && isSlotEditable(color);
+            const label = document.createElement("label");
+            label.className = "surprise-target-item";
+            if (!editable) label.classList.add("inactive-slot");
+            label.addEventListener("click", event => event.stopPropagation());
+
+            const check = document.createElement("input");
+            check.type = "checkbox";
+            check.checked = editable && selected.has(surpriseTargetKey(cluster.name, color.index));
+            check.disabled = !editable;
+            check.addEventListener("click", event => event.stopPropagation());
+            check.addEventListener("change", () => {
+                const key = surpriseTargetKey(cluster.name, color.index);
+                const next = new Map(state.surpriseConfig.targets.map(target => [
+                    surpriseTargetKey(target.materialName, target.slotIndex),
+                    target,
+                ]));
+                if (check.checked) next.set(key, { materialName: cluster.name, slotIndex: color.index });
+                else next.delete(key);
+                state.surpriseConfig.targets = [...next.values()];
+                renderSurpriseMenu();
+            });
+
+            const swatch = document.createElement("span");
+            swatch.className = "target-slot-swatch";
+            swatch.style.background = slotHex(color) ?? "#00000000";
+
+            const text = document.createElement("span");
+            text.className = "surprise-target-item-text";
+            const name = document.createElement("strong");
+            name.textContent = color.runtimeName;
+            const value = document.createElement("small");
+            value.textContent = editable
+                ? `${describeColorName(slotRgba(color))} · ${slotHex(color) ?? "#00000000"}`
+                : "Inactive";
+            text.append(name, value);
+            label.append(check, swatch, text);
+            slots.appendChild(label);
+        }
+        material.appendChild(slots);
+        surpriseTargetList.appendChild(material);
+    }
+    surpriseTargetList.scrollTop = previousScrollTop;
+}
+
+function renderSurpriseMenu() {
+    if (!surpriseMenu) return;
+    const selectedPreset = state.surpriseConfig.preset;
+    if (surprisePresetGrid) {
+        surprisePresetGrid.innerHTML = "";
+        for (const option of SURPRISE_PRESETS) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "surprise-preset-button";
+            button.textContent = option.label;
+            button.dataset.preset = option.id;
+            button.classList.toggle("is-selected", option.id === selectedPreset);
+            button.setAttribute("aria-pressed", String(option.id === selectedPreset));
+            button.addEventListener("click", event => {
+                event.preventDefault();
+                event.stopPropagation();
+                state.surpriseConfig.preset = option.id;
+                saveSurpriseConfig();
+                renderSurpriseMenu();
+            });
+            surprisePresetGrid.appendChild(button);
+        }
+    }
+
+    const intensityPercent = Math.round(state.surpriseConfig.intensity * 100);
+    if (surpriseIntensity) surpriseIntensity.value = String(intensityPercent);
+    if (surpriseIntensityValue) surpriseIntensityValue.textContent = `${intensityPercent}%`;
+    document.querySelectorAll("input[name='surprise-target-mode']").forEach(input => {
+        input.checked = input.value === state.surpriseConfig.targetMode;
+    });
+
+    const count = currentSurpriseTargetCount();
+    const countLabel = `${count} active slot${count === 1 ? "" : "s"}`;
+    if (surpriseMenuSummary) {
+        const presetLabel = SURPRISE_PRESETS.find(option => option.id === selectedPreset)?.label || "Random";
+        surpriseMenuSummary.textContent = `${presetLabel} · ${countLabel}`;
+    }
+    if (surpriseTargetSummary) {
+        surpriseTargetSummary.textContent = state.surpriseConfig.targetMode === "selected"
+            ? `${countLabel} selected across the active CMD`
+            : `${countLabel} in ${surpriseMenuState.cluster?.name || "this material"}`;
+    }
+    if (surpriseApply) surpriseApply.disabled = count === 0 || state.surpriseConfig.intensity <= 0;
+    if (surpriseEditTargets) {
+        surpriseEditTargets.textContent = surpriseMenuState.targetPickerOpen
+            ? "Hide slot selector"
+            : "Select slots";
+    }
+    surpriseTargetPicker?.classList.toggle("hidden", !surpriseMenuState.targetPickerOpen);
+    if (surpriseTargetListToggle) {
+        const expanded = !surpriseMenuState.targetListCollapsed;
+        surpriseTargetListToggle.setAttribute("aria-expanded", String(expanded));
+        const icon = surpriseTargetListToggle.querySelector("span");
+        if (icon) icon.textContent = expanded ? "▾" : "▸";
+    }
+    surpriseTargetList?.classList.toggle("hidden", surpriseMenuState.targetListCollapsed);
+    if (surpriseMenuState.targetPickerOpen && !surpriseMenuState.targetListCollapsed) {
+        renderSurpriseTargetList();
+    }
+
+    const activeCmd = state.cmdEntries[state.activeCmdIndex];
+    const cmdSnapshots = state.surpriseSnapshots.get(activeCmd);
+    const restorableMaterials = cmdSnapshots
+        ? [...cmdSnapshots.entries()].filter(([, snapshot]) => hasRestorableSurpriseSlots(activeCmd, snapshot))
+        : [];
+    const currentMaterialSnapshot = cmdSnapshots?.get(surpriseMenuState.cluster?.name);
+    const canResetCurrentMaterial = hasRestorableSurpriseSlots(activeCmd, currentMaterialSnapshot);
+    const showResetMore = restorableMaterials.some(
+        ([materialName]) => materialName !== surpriseMenuState.cluster?.name,
+    );
+    if (surpriseResetColors) {
+        surpriseResetColors.disabled = !canResetCurrentMaterial;
+        surpriseResetColors.title = canResetCurrentMaterial
+            ? `Reset randomized colors in ${surpriseMenuState.cluster?.name || "this material"}`
+            : "This material has no randomized colors to reset";
+    }
+    surpriseResetGroup?.classList.toggle("has-more", showResetMore);
+    surpriseResetMore?.classList.toggle("hidden", !showResetMore);
+    if (!showResetMore) surpriseMenuState.resetMenuOpen = false;
+    if (surpriseResetMore) surpriseResetMore.setAttribute("aria-expanded", String(surpriseMenuState.resetMenuOpen));
+    surpriseResetMenu?.classList.toggle("hidden", !surpriseMenuState.resetMenuOpen);
+    if (surpriseResetAll) surpriseResetAll.disabled = restorableMaterials.length === 0;
+    updateSurpriseButtonStates();
+}
+
+function positionSurpriseMenu(anchor) {
+    if (!surpriseMenu || !anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const pad = 10;
+    const gap = 8;
+    const width = surpriseMenu.offsetWidth || 390;
+    const height = surpriseMenu.offsetHeight || 420;
+    let left = rect.right - width;
+    let top = rect.bottom + gap;
+    if (top + height > window.innerHeight - pad) top = rect.top - height - gap;
+    left = Math.min(window.innerWidth - width - pad, Math.max(pad, left));
+    top = Math.min(window.innerHeight - height - pad, Math.max(pad, top));
+    surpriseMenu.style.left = `${left}px`;
+    surpriseMenu.style.top = `${top}px`;
+}
+
+function closeSurpriseMenu() {
+    surpriseMenuState.anchor?.setAttribute("aria-expanded", "false");
+    surpriseMenuState.open = false;
+    surpriseMenuState.anchor = null;
+    surpriseMenuState.cluster = null;
+    surpriseMenuState.targetPickerOpen = false;
+    surpriseMenuState.resetMenuOpen = false;
+    surpriseMenu?.classList.add("hidden");
+}
+
+function openSurpriseMenu(anchor, cluster) {
+    if (surpriseMenuState.open && surpriseMenuState.anchor === anchor) {
+        closeSurpriseMenu();
+        return;
+    }
+    closeCustomColorPicker();
+    surpriseMenuState.open = true;
+    surpriseMenuState.anchor = anchor;
+    surpriseMenuState.cluster = cluster;
+    surpriseMenuState.targetPickerOpen = state.surpriseConfig.targetMode === "selected";
+    surpriseMenuState.resetMenuOpen = false;
+    anchor.setAttribute("aria-expanded", "true");
+    surpriseMenu?.classList.remove("hidden");
+    renderSurpriseMenu();
+    positionSurpriseMenu(anchor);
+}
+
+function captureSurpriseMenuView() {
+    return {
+        targetPickerOpen: surpriseMenuState.targetPickerOpen,
+        targetListCollapsed: surpriseMenuState.targetListCollapsed,
+        menuScrollTop: surpriseMenu?.scrollTop ?? 0,
+        targetListScrollTop: surpriseTargetList?.scrollTop ?? 0,
+    };
+}
+
+function reopenSurpriseMenuAfterRender(cmd, clusterName, view) {
+    if (!clusterName) return;
+    const updatedCluster = findSurpriseCluster(cmd, clusterName);
+    const updatedAnchor = [...document.querySelectorAll(".cluster-surprise-settings")]
+        .find(button => button.dataset.clusterName === clusterName);
+    if (!updatedCluster || !updatedAnchor) return;
+    openSurpriseMenu(updatedAnchor, updatedCluster);
+    surpriseMenuState.targetPickerOpen = view?.targetPickerOpen ?? false;
+    surpriseMenuState.targetListCollapsed = view?.targetListCollapsed ?? false;
+    renderSurpriseMenu();
+    positionSurpriseMenu(updatedAnchor);
+    if (surpriseTargetList && !surpriseMenuState.targetListCollapsed) {
+        surpriseTargetList.scrollTop = view?.targetListScrollTop ?? 0;
+    }
+    if (surpriseMenu) surpriseMenu.scrollTop = view?.menuScrollTop ?? 0;
+}
+
+function resetSurpriseColors({ keepMenuOpen = false } = {}) {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const cmdSnapshots = state.surpriseSnapshots.get(cmd);
+    if (!cmd || !cmdSnapshots?.size) return 0;
+    const reopenClusterName = keepMenuOpen ? surpriseMenuState.cluster?.name : null;
+    const reopenView = keepMenuOpen ? captureSurpriseMenuView() : null;
+
+    let restored = 0;
+    for (const snapshot of cmdSnapshots.values()) {
+        for (const slot of snapshot.slots) {
+            // A later manual/sync edit supersedes Surprise Me. Reset must not
+            // overwrite it; only restore colors still equal to our last result.
+            if (!isSurpriseSnapshotSlotRestorable(cmd, slot)) continue;
+            writeRgbaAtOffset(cmd.workingBuffer, slot.offset, slot.rgba);
+            updateColorModelAtOffset(cmd, slot.offset, slot.rgba);
+            restored += 1;
+        }
+    }
+    state.surpriseSnapshots.delete(cmd);
+    recomputeInspectorDirty();
     updateInspectorDirtyUi();
+    closeSurpriseMenu();
     renderColorClusters(cmd.colorClusters);
     renderCurrentChanges();
     renderSyncPanels();
     updateExportButtons();
-    return activeSlots.length;
+    reopenSurpriseMenuAfterRender(cmd, reopenClusterName, reopenView);
+    return restored;
 }
 
-function discardSurpriseMaterialColors(cluster) {
+function surpriseMaterialColors(cluster, { keepMenuOpen = false } = {}) {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    if (!cmd || !cluster) return 0;
+    const targets = getSurpriseTargets(cluster, cmd);
+    if (!targets.length) return 0;
+    const reopenClusterName = keepMenuOpen ? cluster.name : null;
+    const reopenView = keepMenuOpen ? captureSurpriseMenuView() : null;
+
+    let cmdSnapshots = state.surpriseSnapshots.get(cmd);
+    let changed = 0;
+
+    for (const { cluster: targetCluster, color } of targets) {
+        const current = slotRgba(color);
+        const rgba = surpriseColorForSlot(color);
+        if (!current || rgbaEquals(current, rgba)) continue;
+        if (!cmdSnapshots) {
+            cmdSnapshots = new Map();
+            state.surpriseSnapshots.set(cmd, cmdSnapshots);
+        }
+        let snapshot = cmdSnapshots.get(targetCluster.name);
+        if (!snapshot) {
+            snapshot = { slots: [] };
+            cmdSnapshots.set(targetCluster.name, snapshot);
+        }
+        let slotSnapshot = snapshot.slots.find(slot => slot.offset === color.color.absoluteOffset);
+        if (!slotSnapshot) {
+            slotSnapshot = {
+                offset: color.color.absoluteOffset,
+                rgba: current,
+                lastSurpriseRgba: rgba,
+            };
+            snapshot.slots.push(slotSnapshot);
+        } else {
+            slotSnapshot.lastSurpriseRgba = rgba;
+        }
+        writeRgbaAtOffset(cmd.workingBuffer, color.color.absoluteOffset, rgba);
+        updateColorModelAtOffset(cmd, color.color.absoluteOffset, rgba);
+        changed += 1;
+    }
+
+    if (!changed) return 0;
+
+    state.inspectorDirty = true;
+    updateInspectorDirtyUi();
+    closeSurpriseMenu();
+    renderColorClusters(cmd.colorClusters);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+    reopenSurpriseMenuAfterRender(cmd, reopenClusterName, reopenView);
+    return changed;
+}
+
+function discardSurpriseMaterialColors(cluster, { keepMenuOpen = false } = {}) {
     const cmd = state.cmdEntries[state.activeCmdIndex];
     const cmdSnapshots = state.surpriseSnapshots.get(cmd);
     const snapshot = cmdSnapshots?.get(cluster?.name);
     if (!cmd || !snapshot) return 0;
+    const reopenClusterName = keepMenuOpen ? cluster.name : null;
+    const reopenView = keepMenuOpen ? captureSurpriseMenuView() : null;
 
+    let restored = 0;
     for (const slot of snapshot.slots) {
+        if (!isSurpriseSnapshotSlotRestorable(cmd, slot)) continue;
         writeRgbaAtOffset(cmd.workingBuffer, slot.offset, slot.rgba);
         updateColorModelAtOffset(cmd, slot.offset, slot.rgba);
+        restored += 1;
     }
     cmdSnapshots.delete(cluster.name);
     if (!cmdSnapshots.size) state.surpriseSnapshots.delete(cmd);
 
-    state.inspectorDirty = snapshot.inspectorDirty;
+    recomputeInspectorDirty();
     updateInspectorDirtyUi();
     renderColorClusters(cmd.colorClusters);
     renderCurrentChanges();
     renderSyncPanels();
     updateExportButtons();
-    return snapshot.slots.length;
+    reopenSurpriseMenuAfterRender(cmd, reopenClusterName, reopenView);
+    return restored;
+}
+
+function resetSurpriseSettings() {
+    state.surpriseConfig = {
+        ...SURPRISE_DEFAULTS,
+        targets: [],
+    };
+    surpriseMenuState.expandedMaterials.clear();
+    surpriseMenuState.targetListCollapsed = false;
+    surpriseMenuState.resetMenuOpen = false;
+    saveSurpriseConfig();
+    saveUiState({ surpriseTargetListCollapsed: false });
+    surpriseMenuState.targetPickerOpen = false;
+    renderSurpriseMenu();
+}
+
+function bindSurpriseMenuEvents() {
+    surpriseMenuClose?.addEventListener("click", closeSurpriseMenu);
+    surpriseApply?.addEventListener("click", () => {
+        surpriseMaterialColors(surpriseMenuState.cluster, { keepMenuOpen: true });
+    });
+    surpriseEditTargets?.addEventListener("click", () => {
+        surpriseMenuState.targetPickerOpen = !surpriseMenuState.targetPickerOpen;
+        renderSurpriseMenu();
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    surpriseTargetListToggle?.addEventListener("click", () => {
+        surpriseMenuState.targetListCollapsed = !surpriseMenuState.targetListCollapsed;
+        saveUiState({ surpriseTargetListCollapsed: surpriseMenuState.targetListCollapsed });
+        renderSurpriseMenu();
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    surpriseIntensity?.addEventListener("input", () => {
+        state.surpriseConfig.intensity = Math.max(0, Math.min(1, Number(surpriseIntensity.value) / 100));
+        saveSurpriseConfig();
+        renderSurpriseMenu();
+    });
+    document.querySelectorAll("input[name='surprise-target-mode']").forEach(input => {
+        input.addEventListener("change", () => {
+            state.surpriseConfig.targetMode = input.value === "selected" ? "selected" : "material";
+            saveSurpriseConfig();
+            surpriseMenuState.targetPickerOpen = state.surpriseConfig.targetMode === "selected";
+            renderSurpriseMenu();
+            if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+        });
+    });
+    surpriseTargetSelectAll?.addEventListener("click", () => {
+        const cmd = state.cmdEntries[state.activeCmdIndex];
+        state.surpriseConfig.targets = (cmd?.colorClusters ?? []).flatMap(cluster => (
+            activeEditableSurpriseSlots(cluster).map(color => ({
+                materialName: cluster.name,
+                slotIndex: color.index,
+            }))
+        ));
+        saveSurpriseConfig();
+        renderSurpriseMenu();
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    surpriseTargetSelectNone?.addEventListener("click", () => {
+        state.surpriseConfig.targets = [];
+        saveSurpriseConfig();
+        renderSurpriseMenu();
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    surpriseResetColors?.addEventListener("click", () => {
+        const materialName = surpriseMenuState.cluster?.name;
+        const restored = discardSurpriseMaterialColors(surpriseMenuState.cluster, { keepMenuOpen: true });
+        if (restored) showStatus(parserStatus, "good", `Reset ${restored} randomized slot${restored === 1 ? "" : "s"} in ${materialName}.`);
+    });
+    surpriseResetMore?.addEventListener("click", event => {
+        event.stopPropagation();
+        surpriseMenuState.resetMenuOpen = !surpriseMenuState.resetMenuOpen;
+        renderSurpriseMenu();
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    surpriseResetAll?.addEventListener("click", () => {
+        surpriseMenuState.resetMenuOpen = false;
+        const restored = resetSurpriseColors({ keepMenuOpen: true });
+        if (restored) showStatus(parserStatus, "good", `Reset all ${restored} randomized slot${restored === 1 ? "" : "s"} in the active CMD.`);
+    });
+    surpriseResetSettings?.addEventListener("click", resetSurpriseSettings);
+    document.addEventListener("click", event => {
+        if (surpriseMenuState.resetMenuOpen && !surpriseResetGroup?.contains(event.target)) {
+            surpriseMenuState.resetMenuOpen = false;
+            surpriseResetMore?.setAttribute("aria-expanded", "false");
+            surpriseResetMenu?.classList.add("hidden");
+        }
+        if (!surpriseMenuState.open) return;
+        if (surpriseMenu?.contains(event.target)) return;
+        if (event.target.closest?.(".cluster-surprise-settings")) return;
+        closeSurpriseMenu();
+    });
+    window.addEventListener("resize", () => {
+        if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+    });
+    window.addEventListener("keydown", event => {
+        if (event.key === "Escape" && surpriseMenuState.open) {
+            event.preventDefault();
+            if (surpriseMenuState.resetMenuOpen) {
+                surpriseMenuState.resetMenuOpen = false;
+                renderSurpriseMenu();
+                return;
+            }
+            closeSurpriseMenu();
+        }
+    });
 }
 
 function renderColorClusters(clusters) {
     if (!clusterInspector) return;
+    if (surpriseMenuState.open) closeSurpriseMenu();
     clusterInspector.innerHTML = "";
 
     const customNames = new Set(
@@ -5083,19 +5769,41 @@ function renderColorClusters(clusters) {
         const surpriseButton = document.createElement("button");
         surpriseButton.type = "button";
         surpriseButton.className = "secondary-button cluster-surprise-button";
+        surpriseButton.dataset.clusterName = cluster.name;
         surpriseButton.textContent = "Surprise Me";
         surpriseButton.title = "Randomize active colors in this material";
         surpriseButton.setAttribute("aria-label", `Surprise Me: randomize active colors in ${cluster.name}`);
-        surpriseButton.disabled = !cluster.colors.some(color => isSlotEnabled(color) && isSlotEditable(color));
+        surpriseButton.disabled = state.surpriseConfig.targetMode === "selected"
+            ? getSurpriseTargets(null).length === 0
+            : activeEditableSurpriseSlots(cluster).length === 0;
         surpriseButton.addEventListener("click", event => {
             event.preventDefault();
             event.stopPropagation();
             surpriseMaterialColors(cluster);
         });
+        const surpriseSettingsButton = document.createElement("button");
+        surpriseSettingsButton.type = "button";
+        surpriseSettingsButton.className = "cluster-surprise-settings";
+        surpriseSettingsButton.dataset.clusterName = cluster.name;
+        surpriseSettingsButton.textContent = "▾";
+        surpriseSettingsButton.title = "Open Surprise Me settings";
+        surpriseSettingsButton.setAttribute("aria-label", `Open Surprise Me settings for ${cluster.name}`);
+        surpriseSettingsButton.setAttribute("aria-haspopup", "dialog");
+        surpriseSettingsButton.setAttribute("aria-expanded", "false");
+        surpriseSettingsButton.addEventListener("click", event => {
+            event.preventDefault();
+            event.stopPropagation();
+            openSurpriseMenu(surpriseSettingsButton, cluster);
+        });
+        const surpriseGroup = document.createElement("span");
+        surpriseGroup.className = "cluster-surprise-group";
+        surpriseGroup.append(surpriseButton, surpriseSettingsButton);
         const actions = document.createElement("span");
         actions.className = "cluster-card-actions";
-        actions.appendChild(surpriseButton);
-        if (state.surpriseSnapshots.get(state.cmdEntries[state.activeCmdIndex])?.has(cluster.name)) {
+        actions.appendChild(surpriseGroup);
+        const activeCmd = state.cmdEntries[state.activeCmdIndex];
+        const surpriseSnapshot = state.surpriseSnapshots.get(activeCmd)?.get(cluster.name);
+        if (hasRestorableSurpriseSlots(activeCmd, surpriseSnapshot)) {
             const discardSurpriseButton = document.createElement("button");
             discardSurpriseButton.type = "button";
             discardSurpriseButton.className = "secondary-button cluster-surprise-discard";
@@ -6664,6 +7372,7 @@ function bindUi() {
         });
     });
 
+    bindSurpriseMenuEvents();
     bindColorPickerEvents();
     bindReplaceColorUi();
     bindReferenceViewerResize();
