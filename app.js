@@ -208,9 +208,13 @@ const state = {
 
     // Duplicate Palette: one complete palette into selected standard CMDs.
     // EX/DX CMDs may be selected as sources, but never as targets.
+    // scopeMode "selected" narrows the copy to scopeSlots instead of the
+    // whole palette.
     paletteDuplicate: {
         sourceCmdIndex: null,
         targetCmdIndexes: [],
+        scopeMode: "all",
+        scopeSlots: [],
         undo: null,
     },
 };
@@ -231,6 +235,10 @@ const colorPickerState = {
     resizingWindow: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
+};
+
+const duplicateScopeState = {
+    expandedMaterials: new Set(),
 };
 
 const surpriseMenuState = {
@@ -306,6 +314,10 @@ const colorSyncActiveCmdSelect = document.querySelector("#color-sync-active-cmd"
 const patternSyncActiveCmdSelect = document.querySelector("#pattern-sync-active-cmd");
 const duplicateSourceCmdSelect = document.querySelector("#duplicate-source-cmd");
 const duplicatePaletteUndoBtn = document.querySelector("#undo-duplicate-palette");
+const duplicateScopeSummary = document.querySelector("#duplicate-scope-summary");
+const duplicateScopeList = document.querySelector("#duplicate-scope-list");
+const duplicateScopeSelectAll = document.querySelector("#duplicate-scope-select-all");
+const duplicateScopeSelectNone = document.querySelector("#duplicate-scope-select-none");
 const replaceActiveCmdSelect = document.querySelector("#replace-active-cmd");
 const cmdInspectorControls = document.querySelector("#cmd-inspector-controls");
 const multiCmdInspectorNotice = document.querySelector("#multi-cmd-inspector-notice");
@@ -1714,6 +1726,7 @@ function resetLoadedCmdState() {
     state.detectedCostume = null;
     state.customMdfMaterials = [];
     state.customMaterialMappings = [];
+    resetDuplicateScope();
     state.paletteDuplicate.undo = null;
     hideStatus(colorStateStatus);
 }
@@ -2454,6 +2467,40 @@ function listDuplicatePaletteTargetIndexes(sourceIndex = state.paletteDuplicate.
         .map(({ index }) => index);
 }
 
+function duplicatePaletteSource() {
+    return state.cmdEntries[state.paletteDuplicate.sourceCmdIndex] ?? null;
+}
+
+// Slots the source palette can hand over: every parsed, editable slot,
+// including disabled ones, because the copy carries the Enable state too.
+function listDuplicateScopeSlots(source = duplicatePaletteSource()) {
+    return (source?.colorClusters ?? []).flatMap(cluster => (
+        (cluster.colors ?? [])
+            .filter(color => isSlotEditable(color))
+            .map(color => ({ materialName: cluster.name, slotIndex: color.index }))
+    ));
+}
+
+// Selected slots that still exist in the current source, as lookup keys.
+// Returns null while the whole palette is being copied.
+function duplicateScopeKeys(source = duplicatePaletteSource()) {
+    if (state.paletteDuplicate.scopeMode !== "selected") return null;
+    const available = new Set(listDuplicateScopeSlots(source).map(slot => (
+        materialSlotKey(slot.materialName, slot.slotIndex)
+    )));
+    return new Set(
+        state.paletteDuplicate.scopeSlots
+            .map(slot => materialSlotKey(slot.materialName, slot.slotIndex))
+            .filter(key => available.has(key)),
+    );
+}
+
+function resetDuplicateScope() {
+    state.paletteDuplicate.scopeMode = "all";
+    state.paletteDuplicate.scopeSlots = [];
+    duplicateScopeState.expandedMaterials.clear();
+}
+
 function resetSyncSelections() {
     const materials = listMaterialNames().filter(name => {
         const slots = listSlots(state.cmdEntries[0], name);
@@ -2483,6 +2530,7 @@ function resetSyncSelections() {
     state.paletteDuplicate.targetCmdIndexes = defaultDuplicateSource
         ? listDuplicatePaletteTargetIndexes(defaultDuplicateSource.index)
         : [];
+    resetDuplicateScope();
     state.paletteDuplicate.undo = null;
 }
 
@@ -2633,7 +2681,7 @@ function rawSlotEnabled(cmd, slot) {
     return value === null ? isSlotEnabled(slot) : value;
 }
 
-function buildPaletteDuplicatePlan(source, target) {
+function buildPaletteDuplicatePlan(source, target, scopeKeys = null) {
     const operations = [];
     let missingMaterials = 0;
     let missingSlots = 0;
@@ -2642,13 +2690,18 @@ function buildPaletteDuplicatePlan(source, target) {
     for (const sourceCluster of source.colorClusters ?? []) {
         if (!sourceCluster.colors?.length) continue;
 
+        const scopedColors = sourceCluster.colors.filter(slot => (
+            !scopeKeys || scopeKeys.has(materialSlotKey(sourceCluster.name, slot.index))
+        ));
+        if (!scopedColors.length) continue;
+
         const targetCluster = getMaterial(target, sourceCluster.name);
         if (!targetCluster) {
-            missingMaterials += sourceCluster.colors.filter(isSlotEditable).length;
+            missingMaterials += scopedColors.filter(isSlotEditable).length;
             continue;
         }
 
-        for (const sourceSlot of sourceCluster.colors) {
+        for (const sourceSlot of scopedColors) {
             if (!isSlotEditable(sourceSlot)) {
                 skippedNonEditable += 1;
                 continue;
@@ -2690,13 +2743,18 @@ function applyPaletteDuplicate() {
         throw new Error("Select at least one standard target palette.");
     }
 
+    const scopeKeys = duplicateScopeKeys(source);
+    if (scopeKeys && !scopeKeys.size) {
+        throw new Error("Select at least one material slot to copy, or switch back to the entire palette.");
+    }
+
     const targetPlans = selectedTargetIndexes
         .map(index => ({ index, cmd: state.cmdEntries[index] }))
         .filter(({ cmd }) => cmd)
         .map(({ index, cmd }) => ({
             index,
             cmd,
-            plan: buildPaletteDuplicatePlan(source, cmd),
+            plan: buildPaletteDuplicatePlan(source, cmd, scopeKeys),
         }));
     const operationCount = targetPlans.reduce((total, entry) => total + entry.plan.operations.length, 0);
     if (!operationCount) {
@@ -5141,7 +5199,7 @@ function surpriseColorForSlot(color) {
     return mixSurpriseRgb(current, randomThemeRgbKeepingAlpha(color, preset), intensity);
 }
 
-function surpriseTargetKey(materialName, slotIndex) {
+function materialSlotKey(materialName, slotIndex) {
     return `${materialName}\u0000${slotIndex}`;
 }
 
@@ -5160,7 +5218,7 @@ function getSurpriseTargets(cluster, cmd = state.cmdEntries[state.activeCmdIndex
         return state.surpriseConfig.targets.flatMap(target => {
             const targetCluster = findSurpriseCluster(cmd, target.materialName);
             const color = targetCluster?.colors?.find(slot => slot.index === target.slotIndex);
-            const key = surpriseTargetKey(target.materialName, target.slotIndex);
+            const key = materialSlotKey(target.materialName, target.slotIndex);
             if (!color || !isSlotEnabled(color) || !isSlotEditable(color) || seen.has(key)) return [];
             seen.add(key);
             return [{ cluster: targetCluster, color }];
@@ -5223,112 +5281,105 @@ function updateSurpriseButtonStates() {
     });
 }
 
-function renderSurpriseTargetList() {
-    if (!surpriseTargetList) return;
-    const cmd = state.cmdEntries[state.activeCmdIndex];
-    const previousScrollTop = surpriseTargetList.scrollTop;
-    surpriseTargetList.innerHTML = "";
+// Material/slot tree shared by the Surprise Me menu and Duplicate Palette.
+function renderMaterialSlotPicker(container, {
+    cmd,
+    selectedKeys,
+    expandedMaterials,
+    emptyMessage,
+    isSlotSelectable = color => isSlotEnabled(color) && isSlotEditable(color),
+    describeSlot = (color, selectable) => (selectable
+        ? `${describeColorName(slotRgba(color))} · ${slotHex(color) ?? "#00000000"}`
+        : "Inactive"),
+    countLabel = (selected, total) => `${selected}/${total} active slots`,
+    emptyCountLabel = "No active slots",
+    onToggle,
+    onExpandedChange,
+}) {
+    if (!container) return;
+    const previousScrollTop = container.scrollTop;
+    container.innerHTML = "";
     if (!cmd?.colorClusters?.length) {
         const empty = document.createElement("span");
         empty.className = "muted-inline";
-        empty.textContent = "Load a CMD palette to choose target slots.";
-        surpriseTargetList.appendChild(empty);
+        empty.textContent = emptyMessage;
+        container.appendChild(empty);
         return;
     }
 
-    const selected = new Set(state.surpriseConfig.targets.map(target => (
-        surpriseTargetKey(target.materialName, target.slotIndex)
-    )));
-
     for (const cluster of cmd.colorClusters) {
         const material = document.createElement("div");
-        material.className = "surprise-target-material";
-        const editableSlots = activeEditableSurpriseSlots(cluster);
-        const selectedCount = editableSlots.filter(color => (
-            selected.has(surpriseTargetKey(cluster.name, color.index))
+        material.className = "slot-picker-material";
+        const selectableSlots = (cluster.colors ?? []).filter(color => isSlotSelectable(color));
+        const selectedCount = selectableSlots.filter(color => (
+            selectedKeys.has(materialSlotKey(cluster.name, color.index))
         )).length;
-        const expanded = surpriseMenuState.expandedMaterials.has(cluster.name);
+        const expanded = expandedMaterials.has(cluster.name);
 
         const heading = document.createElement("div");
-        heading.className = "surprise-target-material-header";
+        heading.className = "slot-picker-material-header";
 
         const toggle = document.createElement("button");
         toggle.type = "button";
-        toggle.className = "surprise-target-material-toggle";
+        toggle.className = "slot-picker-material-toggle";
         toggle.setAttribute("aria-expanded", String(expanded));
         toggle.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${cluster.name} slots`);
         toggle.textContent = expanded ? "▾" : "▸";
         toggle.addEventListener("click", event => {
             event.stopPropagation();
-            if (expanded) surpriseMenuState.expandedMaterials.delete(cluster.name);
-            else surpriseMenuState.expandedMaterials.add(cluster.name);
-            renderSurpriseTargetList();
-            if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+            if (expanded) expandedMaterials.delete(cluster.name);
+            else expandedMaterials.add(cluster.name);
+            onExpandedChange();
         });
 
         const materialLabel = document.createElement("label");
-        materialLabel.className = "surprise-target-material-select";
+        materialLabel.className = "slot-picker-material-select";
         const materialCheck = document.createElement("input");
         materialCheck.type = "checkbox";
-        materialCheck.checked = editableSlots.length > 0 && selectedCount === editableSlots.length;
-        materialCheck.indeterminate = selectedCount > 0 && selectedCount < editableSlots.length;
-        materialCheck.disabled = editableSlots.length === 0;
-        materialCheck.setAttribute("aria-label", `Select all active slots in ${cluster.name}`);
+        materialCheck.checked = selectableSlots.length > 0 && selectedCount === selectableSlots.length;
+        materialCheck.indeterminate = selectedCount > 0 && selectedCount < selectableSlots.length;
+        materialCheck.disabled = selectableSlots.length === 0;
+        materialCheck.setAttribute("aria-label", `Select all slots in ${cluster.name}`);
         materialCheck.addEventListener("change", () => {
-            const next = new Map(state.surpriseConfig.targets.map(target => [
-                surpriseTargetKey(target.materialName, target.slotIndex),
-                target,
-            ]));
-            for (const color of editableSlots) {
-                const key = surpriseTargetKey(cluster.name, color.index);
-                if (materialCheck.checked) next.set(key, { materialName: cluster.name, slotIndex: color.index });
-                else next.delete(key);
-            }
-            state.surpriseConfig.targets = [...next.values()];
-            renderSurpriseMenu();
+            onToggle(
+                selectableSlots.map(color => ({ materialName: cluster.name, slotIndex: color.index })),
+                materialCheck.checked,
+            );
         });
 
         const materialName = document.createElement("strong");
-        materialName.className = "surprise-target-material-name";
+        materialName.className = "slot-picker-material-name";
         materialName.textContent = cluster.name;
         const materialCount = document.createElement("small");
-        materialCount.textContent = editableSlots.length
-            ? `${selectedCount}/${editableSlots.length} active slots`
-            : "No active slots";
+        materialCount.textContent = selectableSlots.length
+            ? countLabel(selectedCount, selectableSlots.length)
+            : emptyCountLabel;
         materialLabel.append(materialCheck, materialName, materialCount);
         heading.append(toggle, materialLabel);
         material.appendChild(heading);
 
         if (!expanded) {
-            surpriseTargetList.appendChild(material);
+            container.appendChild(material);
             continue;
         }
 
         const slots = document.createElement("div");
-        slots.className = "surprise-target-material-slots";
+        slots.className = "slot-picker-material-slots";
 
         for (const color of cluster.colors) {
-            const editable = isSlotEnabled(color) && isSlotEditable(color);
+            const selectable = isSlotSelectable(color);
             const label = document.createElement("label");
-            label.className = "surprise-target-item";
-            if (!editable) label.classList.add("inactive-slot");
+            label.className = "slot-picker-item";
+            if (!selectable) label.classList.add("inactive-slot");
             label.addEventListener("click", event => event.stopPropagation());
 
             const check = document.createElement("input");
             check.type = "checkbox";
-            check.checked = editable && selected.has(surpriseTargetKey(cluster.name, color.index));
-            check.disabled = !editable;
+            check.checked = selectable && selectedKeys.has(materialSlotKey(cluster.name, color.index));
+            check.disabled = !selectable;
             check.addEventListener("click", event => event.stopPropagation());
             check.addEventListener("change", () => {
-                const key = surpriseTargetKey(cluster.name, color.index);
-                const next = new Map(state.surpriseConfig.targets.map(target => [
-                    surpriseTargetKey(target.materialName, target.slotIndex),
-                    target,
-                ]));
-                if (check.checked) next.set(key, { materialName: cluster.name, slotIndex: color.index });
-                else next.delete(key);
-                state.surpriseConfig.targets = [...next.values()];
-                renderSurpriseMenu();
+                onToggle([{ materialName: cluster.name, slotIndex: color.index }], check.checked);
             });
 
             const swatch = document.createElement("span");
@@ -5336,21 +5387,57 @@ function renderSurpriseTargetList() {
             swatch.style.background = slotHex(color) ?? "#00000000";
 
             const text = document.createElement("span");
-            text.className = "surprise-target-item-text";
+            text.className = "slot-picker-item-text";
             const name = document.createElement("strong");
             name.textContent = color.runtimeName;
             const value = document.createElement("small");
-            value.textContent = editable
-                ? `${describeColorName(slotRgba(color))} · ${slotHex(color) ?? "#00000000"}`
-                : "Inactive";
+            value.textContent = describeSlot(color, selectable);
             text.append(name, value);
             label.append(check, swatch, text);
             slots.appendChild(label);
         }
         material.appendChild(slots);
-        surpriseTargetList.appendChild(material);
+        container.appendChild(material);
     }
-    surpriseTargetList.scrollTop = previousScrollTop;
+    container.scrollTop = previousScrollTop;
+}
+
+// Adds or removes material/slot entries in a selection list, keyed by material
+// name and slot index so repeated toggles cannot duplicate an entry.
+function toggleMaterialSlotSelection(selection, entries, checked) {
+    const next = new Map(selection.map(target => [
+        materialSlotKey(target.materialName, target.slotIndex),
+        target,
+    ]));
+    for (const entry of entries) {
+        const key = materialSlotKey(entry.materialName, entry.slotIndex);
+        if (checked) next.set(key, { materialName: entry.materialName, slotIndex: entry.slotIndex });
+        else next.delete(key);
+    }
+    return [...next.values()];
+}
+
+function renderSurpriseTargetList() {
+    renderMaterialSlotPicker(surpriseTargetList, {
+        cmd: state.cmdEntries[state.activeCmdIndex],
+        selectedKeys: new Set(state.surpriseConfig.targets.map(target => (
+            materialSlotKey(target.materialName, target.slotIndex)
+        ))),
+        expandedMaterials: surpriseMenuState.expandedMaterials,
+        emptyMessage: "Load a CMD palette to choose target slots.",
+        onToggle: (entries, checked) => {
+            state.surpriseConfig.targets = toggleMaterialSlotSelection(
+                state.surpriseConfig.targets,
+                entries,
+                checked,
+            );
+            renderSurpriseMenu();
+        },
+        onExpandedChange: () => {
+            renderSurpriseTargetList();
+            if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
+        },
+    });
 }
 
 function renderSurpriseMenu() {
@@ -6281,6 +6368,33 @@ function renderDuplicateSourceDropdown() {
     };
 }
 
+function renderDuplicateScopeList() {
+    const source = duplicatePaletteSource();
+    renderMaterialSlotPicker(duplicateScopeList, {
+        cmd: source,
+        selectedKeys: duplicateScopeKeys(source) ?? new Set(),
+        expandedMaterials: duplicateScopeState.expandedMaterials,
+        emptyMessage: "Select a source palette to choose the colors to copy.",
+        isSlotSelectable: color => isSlotEditable(color),
+        describeSlot: (color, selectable) => {
+            if (!selectable) return "Not editable";
+            const value = `${describeColorName(slotRgba(color))} · ${slotHex(color) ?? "#00000000"}`;
+            return isSlotEnabled(color) ? value : `${value} · Inactive`;
+        },
+        countLabel: (selected, total) => `${selected}/${total} slots`,
+        emptyCountLabel: "No copyable slots",
+        onToggle: (entries, checked) => {
+            state.paletteDuplicate.scopeSlots = toggleMaterialSlotSelection(
+                state.paletteDuplicate.scopeSlots,
+                entries,
+                checked,
+            );
+            renderSyncPanels();
+        },
+        onExpandedChange: renderDuplicateScopeList,
+    });
+}
+
 function stepDuplicateSource(delta) {
     const candidates = listDuplicatePaletteSourceIndexes();
     if (candidates.length < 2) return;
@@ -6609,7 +6723,7 @@ function renderSyncPanels() {
         } else if (duplicateSource.metadata.variant !== "standard") {
             duplicateNote.textContent = `${duplicateSource.metadata.variant.toUpperCase()} source selected. Its raw colors and Enable states will be copied as reference data; EX/DX files cannot be targets.`;
         } else {
-            duplicateNote.textContent = "Copies every matching editable material color and Enable state into the selected standard palettes.";
+            duplicateNote.textContent = "Copies matching material colors and Enable states into the selected standard palettes.";
         }
     }
 
@@ -6621,9 +6735,30 @@ function renderSyncPanels() {
         },
     });
 
+    document.querySelectorAll("input[name='duplicate-scope-mode']").forEach(input => {
+        input.checked = input.value === duplicate.scopeMode;
+        input.disabled = !duplicateSource;
+    });
+
+    const scopeSelected = duplicate.scopeMode === "selected";
+    const scopeKeys = duplicateScopeKeys(duplicateSource);
+    const scopeCount = scopeKeys?.size ?? 0;
+    const copyableCount = listDuplicateScopeSlots(duplicateSource).length;
+    if (duplicateScopeSummary) {
+        duplicateScopeSummary.textContent = scopeSelected
+            ? `${scopeCount} of ${copyableCount} slot${copyableCount === 1 ? "" : "s"} selected from ${duplicateSource ? cmdDisplayName(duplicateSource) : "the source palette"}`
+            : `All ${copyableCount} copyable slot${copyableCount === 1 ? "" : "s"} in the source palette`;
+    }
+    duplicateScopeList?.classList.toggle("hidden", !scopeSelected || !duplicateSource);
+    if (duplicateScopeSelectAll) duplicateScopeSelectAll.disabled = !scopeSelected || !duplicateSource;
+    if (duplicateScopeSelectNone) duplicateScopeSelectNone.disabled = !scopeSelected || scopeCount === 0;
+    if (scopeSelected && duplicateSource) renderDuplicateScopeList();
+
     const duplicateButton = document.querySelector("#apply-duplicate-palette");
     if (duplicateButton) {
-        duplicateButton.disabled = !duplicateSource || duplicate.targetCmdIndexes.length === 0;
+        duplicateButton.disabled = !duplicateSource
+            || duplicate.targetCmdIndexes.length === 0
+            || (scopeSelected && scopeCount === 0);
     }
     renderDuplicateUndoButton();
 }
@@ -6950,6 +7085,24 @@ function bindUi() {
             state.paletteDuplicate.targetCmdIndexes = [];
             renderSyncPanels();
         });
+
+    document.querySelectorAll("input[name='duplicate-scope-mode']").forEach(input => {
+        input.addEventListener("change", () => {
+            if (!input.checked) return;
+            state.paletteDuplicate.scopeMode = input.value === "selected" ? "selected" : "all";
+            renderSyncPanels();
+        });
+    });
+
+    duplicateScopeSelectAll?.addEventListener("click", () => {
+        state.paletteDuplicate.scopeSlots = listDuplicateScopeSlots();
+        renderSyncPanels();
+    });
+
+    duplicateScopeSelectNone?.addEventListener("click", () => {
+        state.paletteDuplicate.scopeSlots = [];
+        renderSyncPanels();
+    });
 
     // source color edit (color sync only — writes active CMD source slot)
     document.querySelector("#color-source-color-hex")

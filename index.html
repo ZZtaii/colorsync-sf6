@@ -545,6 +545,28 @@
                     <div id="duplicate-target-cmds" class="sync-target-grid target-cmd-grid"></div>
                 </div>
 
+                <div class="sync-target-section">
+                    <div class="sync-target-header">
+                        <span class="sync-target-label">Colors to copy</span>
+                        <div class="sync-target-toggles">
+                            <button type="button" id="duplicate-scope-select-all" class="small-button">All</button>
+                            <button type="button" id="duplicate-scope-select-none" class="small-button">None</button>
+                        </div>
+                    </div>
+                    <div class="duplicate-scope-body">
+                        <label class="slot-picker-radio">
+                            <input type="radio" name="duplicate-scope-mode" value="all" checked>
+                            <span>Entire palette</span>
+                        </label>
+                        <label class="slot-picker-radio">
+                            <input type="radio" name="duplicate-scope-mode" value="selected">
+                            <span>Selected material slots</span>
+                        </label>
+                        <div id="duplicate-scope-summary" class="slot-picker-summary"></div>
+                        <div id="duplicate-scope-list" class="slot-picker-list hidden"></div>
+                    </div>
+                </div>
+
                 <div class="duplicate-palette-actions">
                     <button id="apply-duplicate-palette" type="button">Duplicate Palette</button>
                     <button id="undo-duplicate-palette" type="button" class="secondary-button hidden" disabled>
@@ -1165,7 +1187,7 @@
                     <button id="surprise-target-select-none" type="button" class="small-button">None</button>
                 </span>
             </div>
-            <div id="surprise-target-list" class="surprise-target-list"></div>
+            <div id="surprise-target-list" class="slot-picker-list"></div>
         </div>
 
         <div class="surprise-menu-actions">

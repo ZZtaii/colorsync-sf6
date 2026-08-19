@@ -2269,6 +2269,21 @@ input[type="number"]::-webkit-inner-spin-button {
     margin-top: 20px;
 }
 
+#duplicate-palette-pane .sync-target-section + .sync-target-section {
+    margin-top: 18px;
+}
+
+.duplicate-scope-body {
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+}
+
+.duplicate-scope-body .slot-picker-list {
+    margin-top: 4px;
+    max-height: 280px;
+}
+
 .duplicate-palette-actions {
     display: flex;
     flex-wrap: wrap;
@@ -5870,7 +5885,8 @@ main.page-width {
 }
 
 .surprise-menu-summary,
-.surprise-target-summary {
+.surprise-target-summary,
+.slot-picker-summary {
     display: block;
     margin-top: 3px;
     color: var(--muted);
@@ -5966,7 +5982,8 @@ main.page-width {
     font-size: 0.72rem;
 }
 
-.surprise-radio-option {
+.surprise-radio-option,
+.slot-picker-radio {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -5976,7 +5993,8 @@ main.page-width {
     cursor: pointer;
 }
 
-.surprise-radio-option input {
+.surprise-radio-option input,
+.slot-picker-radio input {
     margin: 0;
     accent-color: var(--accent-hover);
 }
@@ -6047,7 +6065,7 @@ main.page-width {
     outline-offset: 2px;
 }
 
-.surprise-target-list {
+.slot-picker-list {
     display: grid;
     gap: 10px;
     max-height: 250px;
@@ -6055,13 +6073,13 @@ main.page-width {
     padding-right: 3px;
 }
 
-.surprise-target-material {
+.slot-picker-material {
     display: grid;
     gap: 4px;
     padding: 2px 0;
 }
 
-.surprise-target-material-header {
+.slot-picker-material-header {
     display: grid;
     grid-template-columns: 24px minmax(0, 1fr);
     align-items: center;
@@ -6070,11 +6088,11 @@ main.page-width {
     border-radius: 8px;
 }
 
-.surprise-target-material-header:hover {
+.slot-picker-material-header:hover {
     background: rgba(255, 255, 255, 0.035);
 }
 
-.surprise-target-material-toggle {
+.slot-picker-material-toggle {
     display: grid;
     place-items: center;
     width: 24px;
@@ -6087,14 +6105,14 @@ main.page-width {
     cursor: pointer;
 }
 
-.surprise-target-material-toggle:hover,
-.surprise-target-material-toggle:focus-visible {
+.slot-picker-material-toggle:hover,
+.slot-picker-material-toggle:focus-visible {
     background: rgba(156, 124, 255, 0.14);
     color: var(--accent-hover);
     outline: none;
 }
 
-.surprise-target-material-select {
+.slot-picker-material-select {
     display: grid;
     grid-template-columns: 18px minmax(0, 1fr) auto;
     align-items: center;
@@ -6104,17 +6122,17 @@ main.page-width {
     cursor: pointer;
 }
 
-.surprise-target-material-select input {
+.slot-picker-material-select input {
     margin: 0;
     accent-color: var(--accent-hover);
 }
 
-.surprise-target-material-select:has(input:disabled) {
+.slot-picker-material-select:has(input:disabled) {
     cursor: not-allowed;
     opacity: 0.48;
 }
 
-.surprise-target-material-name {
+.slot-picker-material-name {
     overflow: hidden;
     color: var(--accent-hover);
     font-size: 0.78rem;
@@ -6123,13 +6141,13 @@ main.page-width {
     white-space: nowrap;
 }
 
-.surprise-target-material-select small {
+.slot-picker-material-select small {
     color: var(--muted);
     font-size: 0.68rem;
     white-space: nowrap;
 }
 
-.surprise-target-material-slots {
+.slot-picker-material-slots {
     display: grid;
     gap: 4px;
     margin-left: 28px;
@@ -6137,7 +6155,7 @@ main.page-width {
     border-left: 1px solid rgba(126, 146, 190, 0.18);
 }
 
-.surprise-target-item {
+.slot-picker-item {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -6148,39 +6166,39 @@ main.page-width {
     cursor: pointer;
 }
 
-.surprise-target-item:hover {
+.slot-picker-item:hover {
     border-color: rgba(126, 146, 190, 0.24);
     background: rgba(255, 255, 255, 0.035);
 }
 
-.surprise-target-item.inactive-slot {
+.slot-picker-item.inactive-slot {
     opacity: 0.45;
     cursor: not-allowed;
 }
 
-.surprise-target-item input {
+.slot-picker-item input {
     margin: 0;
     accent-color: var(--accent-hover);
 }
 
-.surprise-target-item .target-slot-swatch {
+.slot-picker-item .target-slot-swatch {
     width: 20px;
     height: 20px;
     flex-basis: 20px;
     border-radius: 6px;
 }
 
-.surprise-target-item-text {
+.slot-picker-item-text {
     display: flex;
     flex-direction: column;
     min-width: 0;
 }
 
-.surprise-target-item-text strong {
+.slot-picker-item-text strong {
     font-size: 0.8rem;
 }
 
-.surprise-target-item-text small {
+.slot-picker-item-text small {
     overflow: hidden;
     color: var(--muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -6312,11 +6330,11 @@ main.page-width {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
-    .surprise-target-material-select {
+    .slot-picker-material-select {
         grid-template-columns: 18px minmax(0, 1fr);
     }
 
-    .surprise-target-material-select small {
+    .slot-picker-material-select small {
         grid-column: 2;
     }
 }
