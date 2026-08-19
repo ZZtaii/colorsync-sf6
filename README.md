@@ -25,23 +25,18 @@ to a server.
 
 ## Detailed features
 
-- Edit RGBA values and Enable bytes in-place.
+- Edit colors for any material slot.
+- Replace an exact color throughout the active CMD.
+- Randomize the active slots in one material with Surprise Me.
+- Add custom local images to the resizable reference viewer.
 - Color Sync: copy an active CMD slot to one or more target slots.
 - Pattern Sync: apply the same slot mapping across selected CMD palettes.
-- Duplicate Palette: copy a complete palette from a standard, EX, or DX source
-  into matching standard target palettes, with an option to undo the last copy.
-- Replace an exact color throughout the active CMD.
-- Save and restore color states as portable files when you want to resume work
-  on the same CMD or ZIP set later.
-- Randomize the active slots in one material with Surprise Me, preserving alpha
-  and inactive slots, then keep or discard the result.
-- Review and revert individual staged changes before export.
-- Add custom local images to the resizable reference viewer.
-- Inspect DX CMD palettes with clear reference-only labeling.
-- See the decoded linear RGB value used by REFramework while keeping visual CMD
-  sRGB values primary for editing.
+- Duplicate Palette: swap all colors from the current active slot to another,
+  e.g. swapping EX Color 2 to Color 9.
+- Save and restore color states as portable files. Or enable backups and restore
+  anytime from exported colors.
 - Jump between Load, Edit, Replace, Sync, and Export from the section rail or
-  with the 1-5 keyboard shortcuts.
+  with the 1-5 keyboard shortcut.
 
 ### Mod ZIP workflow
 

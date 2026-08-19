@@ -28,7 +28,7 @@
 
     <title>SF6 CMD Color Sync</title>
 
-    <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96.png">
+    <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96.png">
     <link rel="icon" type="image/svg+xml" sizes="any" href="./data/favicon.svg">
 
     <link
@@ -1111,6 +1111,84 @@
     </div>
 
     <div id="color-picker-runtime-tooltip" class="color-picker-runtime-tooltip" role="tooltip" aria-hidden="true">Final colors depend on textures and lighting. Runtime / REFramework shows the game color. The editor shows the color stored in the CMD file.</div>
+
+    <div
+        id="surprise-menu"
+        class="surprise-menu hidden"
+        role="dialog"
+        aria-label="Surprise Me settings"
+    >
+        <div class="surprise-menu-header">
+            <div>
+                <strong>Surprise Me</strong>
+                <span id="surprise-menu-summary" class="surprise-menu-summary"></span>
+            </div>
+            <button id="surprise-menu-close" type="button" class="surprise-menu-close" aria-label="Close Surprise Me settings">×</button>
+        </div>
+
+        <div class="surprise-menu-section">
+            <div class="surprise-menu-label">Palette style</div>
+            <div id="surprise-preset-grid" class="surprise-preset-grid" role="group" aria-label="Palette style"></div>
+        </div>
+
+        <label class="surprise-intensity-field" for="surprise-intensity">
+            <span class="surprise-menu-label">Color change <output id="surprise-intensity-value">100%</output></span>
+            <input id="surprise-intensity" type="range" min="0" max="100" step="5" value="100">
+            <span class="surprise-intensity-scale"><span>Closer to original</span><span>Full recolor</span></span>
+        </label>
+
+        <div class="surprise-menu-section">
+            <div class="surprise-menu-label">Apply to</div>
+            <label class="surprise-radio-option">
+                <input type="radio" name="surprise-target-mode" value="material" checked>
+                <span>Current material</span>
+            </label>
+            <label class="surprise-radio-option">
+                <input type="radio" name="surprise-target-mode" value="selected">
+                <span>Selected material slots</span>
+            </label>
+            <div id="surprise-target-summary" class="surprise-target-summary"></div>
+            <button id="surprise-edit-targets" type="button" class="secondary-button surprise-edit-targets">Select slots</button>
+        </div>
+
+        <div id="surprise-target-picker" class="surprise-target-picker hidden">
+            <div class="surprise-target-picker-header">
+                <button
+                    id="surprise-target-list-toggle"
+                    type="button"
+                    class="surprise-target-list-toggle"
+                    aria-expanded="true"
+                    aria-controls="surprise-target-list"
+                ><span aria-hidden="true">▾</span> Active slots</button>
+                <span class="surprise-target-picker-actions">
+                    <button id="surprise-target-select-all" type="button" class="small-button">All active</button>
+                    <button id="surprise-target-select-none" type="button" class="small-button">None</button>
+                </span>
+            </div>
+            <div id="surprise-target-list" class="surprise-target-list"></div>
+        </div>
+
+        <div class="surprise-menu-actions">
+            <div class="surprise-menu-reset-actions">
+                <span id="surprise-reset-group" class="surprise-reset-group">
+                    <button id="surprise-reset-colors" type="button" class="secondary-button">Reset colors</button>
+                    <button
+                        id="surprise-reset-more"
+                        type="button"
+                        class="surprise-reset-more hidden"
+                        aria-label="More reset options"
+                        aria-haspopup="menu"
+                        aria-expanded="false"
+                    >▾</button>
+                    <span id="surprise-reset-menu" class="surprise-reset-menu hidden" role="menu">
+                        <button id="surprise-reset-all" type="button" role="menuitem">Reset all randomized colors</button>
+                    </span>
+                </span>
+                <button id="surprise-reset-settings" type="button" class="secondary-button">Reset settings</button>
+            </div>
+            <button id="surprise-apply" type="button" class="surprise-apply-button">Surprise Me</button>
+        </div>
+    </div>
 
     <dialog id="mod-target-dialog" class="mod-target-dialog" aria-labelledby="mod-target-title">
         <div class="mod-target-dialog-card">
