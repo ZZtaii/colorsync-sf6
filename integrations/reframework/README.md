@@ -20,9 +20,15 @@ This companion script reads EMV's cached material values and adds an
    meshes you want to include. EMV's **Change Multiple** edits are included
    when its affected meshes are in the material cache.
 2. Open **SF6 Color Sync**, click **Refresh characters**, and select the
-   character. When a PlayerColorController is available, cached meshes belonging
-   to the same character are grouped together. Otherwise, select individual
-   meshes and export/import them separately.
+   character. Entries show the Freecam player, character, costume resource, and
+   cached mesh count, for example **P1 - Ingrid C2 (8 cached meshes)**.
+   Freecam's player roots keep the two actors separate even if a color controller
+   is shared. A player owns its hair/head even when those reuse another costume's
+   resources; the main body resource supplies the label when available.
+   Without player roots, groups use the controller and costume resource.
+   If neither is available, select individual meshes and export/import separately.
+   Unknown costumes are labeled honestly; unidentified players include their
+   object name and address so duplicate names remain distinguishable.
    Each copy scans the current cache, including meshes opened since the last
    refresh. If character grouping is unavailable, refresh after opening a new
    mesh so it appears in the picker, then export that mesh separately.
@@ -115,6 +121,8 @@ Version 1.2 scans newly cached meshes on every copy and rejects obsolete cache
 wrappers, with regression checks for hair opened after character refresh.
 Version 1.3 adds the four named CMD hair colors. Checks cover real Ingrid CMD
 offsets, active flags, byte-preserving export/import, undo, and browser edits.
+Its dropdown identifies player/costume groups and guards shared controllers,
+identical raw mesh names, and shared hair resources.
 The new runtime fields still need in-game confirmation with exporter 1.3.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
