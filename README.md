@@ -21,6 +21,8 @@ to a server.
 - Sync colors and patterns across costume palettes.
 - Copy a complete palette to another color with Duplicate Palette.
 - Save your color work and restore it later.
+- Import edited in-game colors from EMV / Lua Freecam with one copy and paste.
+- Export the active CMD's current colors as a string to paste back into Color Sync.
 - Export finished palettes as a mod-ready ZIP.
 
 ## Detailed features
@@ -71,6 +73,33 @@ to a server.
 CMD exports are patched at known absolute offsets in the working buffer. This
 tool does not rebuild RSZ graphs.  
 
+## EMV / Lua Freecam color import
+
+Get the exporter from [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
+For EMV Engine and Lua Freecam setup, follow the
+[setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
+Once both are ready, enable the exporter ZIP in Fluffy Mod Manager.
+For manual installation, place the [Lua exporter](integrations/reframework/SF6%20Color%20Sync.lua)
+in your game's `reframework/autorun` folder. Open Materials before editing colors,
+open REFramework's **SF6 Color Sync** panel, and click **Copy for Color Sync**.
+In section 2 of the browser editor, use **Import Freecam Colors** to paste,
+preview, and apply the supported slots to the active CMD of your choice.
+Material names and CustomizeColor indexes determine matches. Export normally.
+See the [setup and format guide](integrations/reframework/README.md).
+
+## Copyable color exports
+
+In section 2, select the active color and open **Export Colors as String**.
+Use **Generate String** to view the export, or **Copy String** to generate and
+copy it directly. The export includes every active supported CustomizeColor
+slot from the working CMD, including applied edits. Inactive slots are omitted.
+Paste the string into **Import Freecam Colors**, preview it for your chosen
+CMD, then apply. RGB and alpha survive an export/import round trip exactly.
+
+Copy always generates a fresh string. Editing or switching the active CMD
+clears the earlier string. If clipboard access is unavailable, the text is
+selected for manual copying with Ctrl+C.
+
 ## Run locally
 
 This is a static ES-module site. It needs an HTTP server; opening `index.html`
@@ -109,6 +138,9 @@ control removes it.
 - RSZ and CMD color-data understanding:
   [REasy](https://github.com/seifhassine/REasy).
 - ZIP generation: [fflate](https://github.com/101arrowz/fflate).
+- Live material editing integration:
+  [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER) and
+  [REFramework](https://github.com/praydog/REFramework).
 
 ## License
 

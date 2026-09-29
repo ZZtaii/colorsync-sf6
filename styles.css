@@ -6338,3 +6338,66 @@ main.page-width {
         grid-column: 2;
     }
 }
+
+/* Freecam / EMV bulk color import */
+.freecam-import-panel { margin: 18px 0; }
+.freecam-import-panel .collapsible-section-body { display: grid; gap: 14px; }
+.freecam-import-panel p { margin: 0; line-height: 1.6; }
+.freecam-setup-link { font-size: 0.85rem; color: var(--muted); }
+.freecam-import-panel a { color: var(--accent-hover); }
+#freecam-color-text {
+    box-sizing: border-box;
+    width: 100%; min-height: 110px; padding: 12px; resize: vertical;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--input-bg, rgba(0, 0, 0, 0.16)); color: var(--text);
+    font: 0.85rem/1.5 ui-monospace, Consolas, monospace;
+}
+.freecam-import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+#freecam-color-preview { display: grid; gap: 12px; min-width: 0; }
+.freecam-preview-heading { font-weight: 600; overflow-wrap: anywhere; }
+.freecam-preview-scroll { overflow: auto; max-height: 360px; border: 1px solid var(--border); border-radius: 10px; }
+.freecam-preview-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+.freecam-preview-table th, .freecam-preview-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+.freecam-preview-table th { position: sticky; top: 0; background: #292e39; }
+.freecam-preview-table td { overflow-wrap: anywhere; min-width: 170px; }
+.freecam-preview-table .swatch-inline { margin-right: 7px; vertical-align: middle; }
+#freecam-color-preview details { overflow-wrap: anywhere; }
+#freecam-color-preview ul { max-height: 220px; overflow: auto; padding-left: 24px; }
+.freecam-doc { max-width: 900px; margin: 40px auto; padding: 24px; }
+.freecam-doc .panel { margin: 20px 0; }
+.freecam-doc li { margin: 10px 0; line-height: 1.6; }
+@media (max-width: 560px) {
+    .freecam-import-actions button { flex: 1 1 100%; }
+    .freecam-import-panel .collapsible-section-summary { flex-wrap: wrap; gap: 6px; }
+}
+
+/* Active CMD clipboard export, beside the Freecam color importer */
+.color-string-export-panel { margin: 18px 0; }
+.color-string-export-panel .collapsible-section-body { display: grid; gap: 14px; min-width: 0; }
+.color-string-export-panel p { margin: 0; line-height: 1.6; }
+#color-string-output {
+    box-sizing: border-box;
+    width: 100%; min-height: 110px; padding: 12px; resize: vertical;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--input-bg, rgba(0, 0, 0, 0.16)); color: var(--text);
+    font: 0.85rem/1.5 ui-monospace, Consolas, monospace;
+}
+@media (max-width: 560px) {
+    .color-string-export-panel .collapsible-section-summary { flex-wrap: wrap; gap: 6px; }
+}
+
+/* Keep setup links and game paths readable on narrow screens */
+.freecam-doc { min-width: 0; }
+.freecam-doc code { white-space: normal; overflow-wrap: anywhere; }
+
+/* REFramework exporter screenshot in the setup guide */
+.freecam-setup-screenshot {
+    margin: 24px 0; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: rgba(0, 0, 0, 0.16);
+}
+.freecam-setup-screenshot img { display: block; width: 100%; height: auto; }
+.freecam-setup-screenshot figcaption {
+    padding: 12px 15px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 0.85rem; line-height: 1.6;
+}

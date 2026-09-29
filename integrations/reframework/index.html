@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Freecam color import · SF6 Color Sync</title>
+    <link rel="icon" type="image/svg+xml" href="../../data/favicon.svg">
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="stylesheet" href="../../image-lightbox.css">
+    <script src="../../image-lightbox.js" defer></script>
+</head>
+<body>
+<main class="freecam-doc">
+    <p><a href="../../">← Back to Color Sync</a></p>
+    <section class="panel">
+        <h1>Bring your in-game colors into Color Sync</h1>
+        <p>Edit colors live with EMV / Lua Freecam, then transfer the edited slots with one copy and paste.</p>
+        <p><a class="secondary-button" href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Download the exporter on Nexus Mods</a></p>
+        <p>If EMV Engine and Lua Freecam are not set up yet, follow the <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a>. Keep REFramework installed.</p>
+        <h2>Once EMV and Freecam are ready</h2>
+        <ol>
+            <li><strong>Enable the exporter.</strong> Place its ZIP in Fluffy Mod Manager’s <code>Games/SF6/Mods</code> folder. Refresh the mod list, enable <strong>SF6 Color Sync - Freecam Exporter</strong>, then start SF6.</li>
+            <li><strong>Edit and copy.</strong> Open the character’s Materials editor before editing colors in EMV / Freecam. Under REFramework’s Script Generated UI, open <strong>SF6 Color Sync</strong>, click <strong>Refresh characters</strong>, select your character, and click <strong>Copy for Color Sync</strong>.</li>
+            <li><strong>Paste and save.</strong> Load your target mod ZIP or CMD in Color Sync and choose the active color you want to update. In section 2, open <strong>Import Freecam Colors</strong>, paste, preview, and apply. Export your CMD or mod ZIP to save the edits.</li>
+        </ol>
+        <figure class="screenshot-slot freecam-setup-screenshot">
+            <img src="../../data/feature-guide/freecam-exporter-setup.webp" width="1280" height="1175" loading="lazy" decoding="async" alt="SF6 Color Sync panel in REFramework showing Refresh characters, the Character / mesh selector, Copy for Color Sync, and a generated export string.">
+            <figcaption>In REFramework, open <strong>SF6 Color Sync</strong>, refresh the character list, select your character or mesh, then click <strong>Copy for Color Sync</strong>. Click the screenshot to enlarge it.</figcaption>
+        </figure>
+    </section>
+    <section class="panel">
+        <h2>Supported colors</h2>
+        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Runtime RGB values convert automatically to visual CMD colors. Matching slots become active.</p>
+        <p>Choose any loaded CMD as your target. Import updates its matching material names and CustomizeColor indexes. Unchanged slots and other shader settings are omitted. Missing or ambiguous matches appear in the preview.</p>
+        <p>Open each mesh’s Materials editor that you want to include. When character grouping is unavailable, export each mesh separately. Open EMV before editing so it can capture the original colors.</p>
+        <h2>Clipboard and undo</h2>
+        <p>To share colors from a loaded CMD, use <strong>Export Colors as String</strong> in section 2 of Color Sync. Generate or copy the active CMD’s current colors, including applied edits, then paste into <strong>Import Freecam Colors</strong> for your chosen target. Inactive slots are omitted.</p>
+        <p>If copying fails, use Ctrl+A / Ctrl+C in the exporter’s text box, or save its JSON file and use <strong>Load Export JSON</strong>. The file is saved to <code>reframework/data/SF6ColorSync/colors.sf6freecam.json</code>.</p>
+        <p><strong>Undo Last Import</strong> restores the pre-import CMD, including earlier edits and active states. Later CMD changes make that undo unavailable.</p>
+        <p><a href="./README.md">Technical format and validation details</a></p>
+    </section>
+</main>
+</body>
+</html>

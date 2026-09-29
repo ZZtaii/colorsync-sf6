@@ -17,6 +17,8 @@
 //   @anchor palette-duplicate
 //   @anchor changes-replace
 //   @anchor color-state
+//   @anchor freecam-import
+//   @anchor color-string-export
 //   @anchor export
 //   @anchor color-picker
 //   @anchor reference-viewer
@@ -79,6 +81,7 @@ import {
     cmdRgbaToRuntimeRgba,
     runtimeRgbaToCmdRgba,
 } from "./lib/sf6-color-space.js";
+import { MAX_FREECAM_COLOR_BYTES, exportCmdColorTransfer, parseFreecamColorTransfer, planFreecamColorImport } from "./lib/freecam-colors.js";
 
 
 // ============================================================
@@ -336,6 +339,22 @@ const saveColorStateBtn = document.querySelector("#save-color-state");
 const loadColorStateBtn = document.querySelector("#load-color-state");
 const colorStateFileInput = document.querySelector("#color-state-file");
 const colorStateStatus = document.querySelector("#color-state-status");
+const freecamInput = document.querySelector("#freecam-color-text");
+const freecamPasteBtn = document.querySelector("#paste-freecam-colors");
+const freecamPreviewBtn = document.querySelector("#preview-freecam-colors");
+const freecamFileBtn = document.querySelector("#load-freecam-colors");
+const freecamFileInput = document.querySelector("#freecam-color-file");
+const freecamPreview = document.querySelector("#freecam-color-preview");
+const freecamApplyBtn = document.querySelector("#apply-freecam-colors");
+const freecamUndoBtn = document.querySelector("#undo-freecam-colors");
+const freecamStatus = document.querySelector("#freecam-color-status");
+let freecamImport = null;
+let freecamUndo = null;
+const colorStringGenerateBtn = document.querySelector("#generate-color-string");
+const colorStringCopyBtn = document.querySelector("#copy-color-string");
+const colorStringOutput = document.querySelector("#color-string-output");
+const colorStringStatus = document.querySelector("#color-string-status");
+let colorStringExport = null;
 
 const colorReplacePanel = document.querySelector("#color-replace-panel");
 const replaceFindColorInput = document.querySelector("#replace-find-color");
@@ -2306,6 +2325,12 @@ function synchronizeCmdInstanceCrcs(cmd) {
         if (view.getUint32(crcOffset, true) === crc) continue;
 
         view.setUint32(crcOffset, crc, true);
+        // Export refreshes metadata without changing colors. Keep the undo
+        // comparison current so exporting does not invalidate a Freecam undo;
+        // the pre-import buffer remains exact, and later edits still differ.
+        if (freecamUndo?.cmd === cmd && freecamUndo.afterBuffer.byteLength === cmd.workingBuffer.byteLength) {
+            new DataView(freecamUndo.afterBuffer).setUint32(crcOffset, crc, true);
+        }
         changed += 1;
     }
 
@@ -3537,6 +3562,192 @@ async function loadColorStateFile(file) {
 
 
 // ============================================================
+// @anchor freecam-import
+// FREECAM / EMV COLOR TRANSFER
+// ============================================================
+
+function resetFreecamPreview() {
+    freecamImport = null;
+    freecamPreview?.replaceChildren();
+    if (freecamApplyBtn) freecamApplyBtn.disabled = true;
+}
+
+function updateFreecamButtons() {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    for (const button of [freecamPasteBtn, freecamPreviewBtn, freecamFileBtn]) {
+        if (button) button.disabled = !cmd;
+    }
+    if (freecamImport && freecamImport.cmd !== cmd) resetFreecamPreview();
+    if (freecamUndo && !state.cmdEntries.includes(freecamUndo.cmd)) freecamUndo = null;
+    if (freecamApplyBtn) freecamApplyBtn.disabled = !freecamImport
+        || !freecamImport.plan.operations.some(operation => operation.changed);
+    if (freecamUndoBtn) freecamUndoBtn.disabled = !freecamUndo || freecamUndo.cmd !== cmd;
+    updateColorStringExportButtons();
+}
+
+function freecamColorCell(rgba, enabled = true) {
+    const cell = document.createElement("td");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch-inline";
+    swatch.style.background = rgbaToHexString(rgba);
+    const text = document.createElement("span");
+    text.textContent = `${rgbaToHexString(rgba)} · ${describeColorName(rgba)}${enabled ? "" : " (inactive)"}`;
+    cell.append(swatch, text);
+    return cell;
+}
+
+function previewFreecamColors() {
+    resetFreecamPreview();
+    const documentData = parseFreecamColorTransfer(freecamInput.value);
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const plan = planFreecamColorImport(documentData, cmd);
+    freecamImport = { documentData, cmd, plan, clusters: cmd.colorClusters, beforeBuffer: cmd.workingBuffer.slice(0), text: freecamInput.value };
+    const title = document.createElement("p");
+    title.className = "freecam-preview-heading";
+    title.textContent = `Apply to ${cmdDisplayName(cmd)} only.`
+        + (documentData.source.object ? ` Source: ${documentData.source.object}.` : "");
+    freecamPreview.append(title);
+    const changed = plan.operations.filter(operation => operation.changed);
+    const summary = document.createElement("p");
+    summary.textContent = `${changed.length} slot${changed.length === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
+        + (plan.duplicates ? ` ${plan.duplicates} identical mesh duplicates combined.` : "")
+        + (documentData.skippedFields ? ` The export omitted ${documentData.skippedFields} unsupported or out-of-range fields.` : "");
+    freecamPreview.append(summary);
+    if (changed.length) {
+        const scroll = document.createElement("div");
+        scroll.className = "freecam-preview-scroll";
+        const table = document.createElement("table");
+        table.className = "freecam-preview-table";
+        const head = document.createElement("thead");
+        const headings = document.createElement("tr");
+        for (const label of ["Material / slot", "Current CMD", "Imported CMD color"]) {
+            const cell = document.createElement("th");
+            cell.scope = "col";
+            cell.textContent = label;
+            headings.append(cell);
+        }
+        head.append(headings);
+        const body = document.createElement("tbody");
+        for (const operation of changed) {
+            const row = document.createElement("tr");
+            const name = document.createElement("td");
+            name.textContent = `${operation.material} / ${operation.parameter}`;
+            row.append(name, freecamColorCell(operation.beforeRgba, operation.beforeEnabled), freecamColorCell(operation.rgba));
+            body.append(row);
+        }
+        table.append(head, body);
+        scroll.append(table);
+        freecamPreview.append(scroll);
+    }
+    if (plan.issues.length) {
+        const details = document.createElement("details");
+        const label = document.createElement("summary");
+        label.textContent = `Review ${plan.issues.length} skipped material/slot matches`;
+        const list = document.createElement("ul");
+        for (const issue of plan.issues) {
+            const item = document.createElement("li");
+            item.textContent = `${issue.material} / ${issue.parameter}: ${issue.reason}`;
+            list.append(item);
+        }
+        details.append(label, list);
+        freecamPreview.append(details);
+    }
+    showStatus(freecamStatus, plan.issues.length ? "warn" : "good",
+        changed.length ? "Preview ready. Imported slots will be active after applying." : "No matching colors need to change.");
+    updateFreecamButtons();
+}
+
+function refreshAfterFreecamImport() {
+    updateInspectorDirtyUi();
+    renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+}
+
+function applyFreecamColors() {
+    const pending = freecamImport;
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    if (!pending || pending.cmd !== cmd || pending.text !== freecamInput.value) throw new Error("Preview this export for the active CMD first.");
+    if (pending.clusters !== cmd.colorClusters || diffBuffers(pending.beforeBuffer, cmd.workingBuffer).length) {
+        previewFreecamColors();
+        showStatus(freecamStatus, "warn", "The CMD changed since the preview. Review the updated preview, then apply again.");
+        return;
+    }
+    const plan = planFreecamColorImport(pending.documentData, cmd);
+    const operations = plan.operations.filter(operation => operation.changed);
+    if (!operations.length) throw new Error("No matching colors need to change.");
+    const beforeBuffer = cmd.workingBuffer.slice(0);
+    for (const operation of operations) {
+        setCmdColorSlot(cmd, operation.material, operation.slotIndex, operation.rgba, { forceEnable: true });
+        removeSurpriseSnapshotSlot(cmd, operation.slot.color.absoluteOffset);
+    }
+    freecamUndo = { cmd, clusters: cmd.colorClusters, beforeBuffer, afterBuffer: cmd.workingBuffer.slice(0), slots: operations.map(operation => operation.slot), wasDirty: state.inspectorDirty };
+    state.inspectorDirty = true;
+    resetFreecamPreview();
+    refreshAfterFreecamImport();
+    showStatus(freecamStatus, "good", `Applied ${operations.length} color slot${operations.length === 1 ? "" : "s"} to ${cmdDisplayName(cmd)}. Export the CMD or mod ZIP to save them.`);
+}
+
+function undoFreecamColors() {
+    const undo = freecamUndo;
+    if (!undo || undo.cmd !== state.cmdEntries[state.activeCmdIndex]) return;
+    if (undo.clusters !== undo.cmd.colorClusters || diffBuffers(undo.afterBuffer, undo.cmd.workingBuffer).length) {
+        throw new Error("Colors changed after this import. Undo is unavailable to preserve your later edits; use Current Changes to revert individual colors.");
+    }
+    new Uint8Array(undo.cmd.workingBuffer).set(new Uint8Array(undo.beforeBuffer));
+    for (const slot of undo.slots) {
+        updateColorModelAtOffset(undo.cmd, slot.color.absoluteOffset, rgbaAtOffset(undo.beforeBuffer, slot.color.absoluteOffset));
+        const enabled = enabledAtOffset(undo.beforeBuffer, slot.enable?.absoluteOffset, slot.enable?.byteLength);
+        if (enabled !== null) { slot.enabled = enabled; slot.enable.value = enabled; }
+    }
+    state.inspectorDirty = undo.wasDirty;
+    freecamUndo = null;
+    resetFreecamPreview();
+    refreshAfterFreecamImport();
+    showStatus(freecamStatus, "good", "Undid the last color import. Earlier color edits were preserved.");
+}
+
+// ============================================================
+// @anchor color-string-export
+// ACTIVE CMD COLORS AS A COPYABLE IMPORT STRING
+// ============================================================
+
+function resetColorStringExport() {
+    colorStringExport = null;
+    if (colorStringOutput) colorStringOutput.value = "";
+    hideStatus(colorStringStatus);
+}
+
+function updateColorStringExportButtons() {
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    for (const button of [colorStringGenerateBtn, colorStringCopyBtn]) {
+        if (button) button.disabled = !cmd;
+    }
+    if (colorStringExport && (colorStringExport.cmd !== cmd || colorStringExport.clusters !== cmd.colorClusters
+        || diffBuffers(colorStringExport.buffer, cmd.workingBuffer).length)) {
+        resetColorStringExport();
+        if (cmd) showStatus(colorStringStatus, "", "The active CMD changed. Generate or copy its current colors again.");
+    }
+}
+
+function generateColorString() {
+    resetColorStringExport();
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const result = exportCmdColorTransfer(cmd, cmd ? cmdDisplayName(cmd) : undefined);
+    colorStringOutput.value = result.text;
+    colorStringOutput.setSelectionRange(0, 0);
+    colorStringOutput.scrollTop = 0;
+    colorStringOutput.scrollLeft = 0;
+    colorStringExport = { cmd, clusters: cmd.colorClusters, buffer: cmd.workingBuffer.slice(0) };
+    showStatus(colorStringStatus, result.skippedSlots ? "warn" : "good",
+        `Ready: ${result.slotCount} active color slot${result.slotCount === 1 ? "" : "s"} from ${cmdDisplayName(cmd)}.`
+        + (result.inactiveSlots ? ` ${result.inactiveSlots} inactive slot${result.inactiveSlots === 1 ? " was" : "s were"} omitted.` : "")
+        + (result.skippedSlots ? ` ${result.skippedSlots} unsupported slot${result.skippedSlots === 1 ? " was" : "s were"} skipped.` : ""));
+    return result;
+}
+
+// ============================================================
 // @anchor export
 // EXPORT
 // ============================================================
@@ -3607,6 +3818,7 @@ function updateExportButtons() {
     if (exportColorsZipButton) exportColorsZipButton.disabled = !state.importedMod || state.cmdEntries.length === 0;
     if (saveColorStateBtn) saveColorStateBtn.disabled = !hasCmds;
     if (loadColorStateBtn) loadColorStateBtn.disabled = !hasCmds;
+    updateFreecamButtons();
 }
 
 function updateZipFileNameField() {
@@ -4991,6 +5203,7 @@ function renderActiveCmdControls() {
 
     renderActiveCmdDropdown(activeCmdSelect);
     updateDxReferenceWarning();
+    updateFreecamButtons();
 }
 
 function updateDxReferenceWarning() {
@@ -6821,6 +7034,60 @@ async function handleSelectedFiles(files) {
 
 function bindUi() {
     initializeHexActionButtons();
+    colorStringGenerateBtn?.addEventListener("click", () => {
+        try { generateColorString(); } catch (error) { showStatus(colorStringStatus, "bad", error.message); }
+    });
+    colorStringCopyBtn?.addEventListener("click", async () => {
+        let result;
+        try { result = generateColorString(); }
+        catch (error) { showStatus(colorStringStatus, "bad", error.message); return; }
+        const snapshot = colorStringExport;
+        try {
+            await navigator.clipboard.writeText(result.text);
+            if (colorStringExport !== snapshot) return;
+            showStatus(colorStringStatus, result.skippedSlots ? "warn" : "good",
+                `Copied ${result.slotCount} active color slot${result.slotCount === 1 ? "" : "s"}. Paste the string into Import Freecam Colors and preview it for your chosen CMD.`);
+        } catch {
+            if (colorStringExport !== snapshot) return;
+            showStatus(colorStringStatus, "warn", "Clipboard access is unavailable. The current export is selected below; copy it with Ctrl+C.");
+            colorStringOutput.focus();
+            colorStringOutput.select();
+        }
+    });
+    freecamInput?.addEventListener("input", () => { resetFreecamPreview(); hideStatus(freecamStatus); });
+    freecamPreviewBtn?.addEventListener("click", () => {
+        try { previewFreecamColors(); } catch (error) { showStatus(freecamStatus, "bad", error.message); }
+    });
+    freecamApplyBtn?.addEventListener("click", () => {
+        try { applyFreecamColors(); } catch (error) { showStatus(freecamStatus, "bad", error.message); }
+    });
+    freecamUndoBtn?.addEventListener("click", () => {
+        try { undoFreecamColors(); } catch (error) { showStatus(freecamStatus, "bad", error.message); }
+    });
+    freecamPasteBtn?.addEventListener("click", async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            resetFreecamPreview();
+            freecamInput.value = text;
+            previewFreecamColors();
+        } catch (error) {
+            showStatus(freecamStatus, "warn", `Paste with Ctrl+V in the text box if clipboard access is unavailable. ${error.message}`);
+            freecamInput.focus();
+        }
+    });
+    freecamFileBtn?.addEventListener("click", () => freecamFileInput.click());
+    freecamFileInput?.addEventListener("change", async () => {
+        const file = freecamFileInput.files?.[0];
+        if (!file) return;
+        try {
+            if (file.size > MAX_FREECAM_COLOR_BYTES) throw new Error("Freecam color imports are limited to 1 MiB.");
+            const text = await file.text();
+            resetFreecamPreview();
+            freecamInput.value = text;
+            previewFreecamColors();
+        } catch (error) { showStatus(freecamStatus, "bad", error.message); }
+        finally { freecamFileInput.value = ""; }
+    });
     modTargetCancel?.addEventListener("click", () => modTargetDialog?.close(""));
     if ("indexedDB" in window) {
         colorLibraryOptions?.classList.remove("hidden");
