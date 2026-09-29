@@ -1,9 +1,19 @@
--- SF6 Color Sync clipboard bridge v1.1
+-- SF6 Color Sync clipboard bridge v1.3
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
 local selected_key, export_text, status = nil, "", ""
 local groups = {}
+local hair_parameters = {
+    OcclusionColor = "OcclusionColor", OcclutionColor = "OcclusionColor",
+    PrimalySpecularColor = "PrimalySpecularColor", PrimarySpecularColor = "PrimalySpecularColor",
+    SecondarySpecularColor = "SecondarySpecularColor",
+    RimLight_Color = "RimLight_Color", Rimlight_Color = "RimLight_Color",
+}
+
+local function color_parameter(name)
+    return name:match("^CustomizeColor_%d+$") and name or hair_parameters[name]
+end
 
 local function rgba(value)
     if not value then return nil end
@@ -83,7 +93,7 @@ end
 local function has_colors(object)
     for _, material in ipairs(object.materials or {}) do
         for _, name in ipairs(material.variable_names or {}) do
-            if name:match("^CustomizeColor_%d+$") then return true end
+            if color_parameter(name) then return true end
         end
     end
     return false
@@ -119,10 +129,24 @@ local function build_export(group)
     local changes, skipped, stale = {}, 0, 0
     local source
     for _, object in ipairs(group.objects) do
-        local ok, key, current_source = pcall(context_for, object)
-        if not ok or key ~= group.key then
+        local ok, key = pcall(context_for, object)
+        if not ok or key ~= group.key or held_transforms[object.xform] ~= object then
             stale = stale + 1
-        else
+        end
+    end
+    if stale > 0 then error("Character objects changed. Refresh characters and export again.") end
+    -- EMV adds meshes to its cache as their Materials panels are opened. The
+    -- character picker is a snapshot, but Copy must include newly cached hair
+    -- and head meshes belonging to the selected player. Never create wrappers
+    -- or refresh materials here: that could replace EMV's original colors.
+    local export_objects = {}
+    for _, object in pairs(held_transforms or {}) do
+        local ok, key, current_source = pcall(function()
+            if not object.xform or not has_colors(object) then return end
+            return context_for(object)
+        end)
+        if ok and key == group.key then
+            export_objects[#export_objects + 1] = object
             source = source or current_source
             for _, material in ipairs(object.materials or {}) do
                 for index, parameter in ipairs(material.variable_names or {}) do
@@ -130,9 +154,10 @@ local function build_export(group)
                     local original = material.orig_vars and material.orig_vars[index]
                     if current ~= nil and original ~= nil and differs(current, original) then
                         local color = rgba(current)
-                        if parameter:match("^CustomizeColor_%d+$") and color and in_range(color) then
+                        local supported_parameter = color_parameter(parameter)
+                        if supported_parameter and color and in_range(color) then
                             changes[#changes + 1] = {
-                                material = material.name, parameter = parameter, rgba = color,
+                                material = material.name, parameter = supported_parameter, rgba = color,
                                 mesh = object.name_w_parent or object.name or "",
                             }
                         else
@@ -143,8 +168,8 @@ local function build_export(group)
             end
         end
     end
-    if stale > 0 then error("Character objects changed. Refresh characters and export again.") end
-    if #changes == 0 then error("No edited CustomizeColor slots found. Open the character's Materials editor in EMV and make your color changes first.") end
+    group.objects = export_objects
+    if #changes == 0 then error("No edited supported CMD colors found. Use CustomizeColor_N or CMD hair colors; BaseColor requires an MDF edit.") end
     if #changes > 4096 then error("Too many edits for one export (maximum 4096).") end
     table.sort(changes, function(a, b)
         local a_key, b_key = a.material .. "|" .. a.parameter .. "|" .. a.mesh, b.material .. "|" .. b.parameter .. "|" .. b.mesh
@@ -157,7 +182,7 @@ local function build_export(group)
     if type(encoded) ~= "string" or encoded == "" then error("REFramework could not encode the color export.") end
     local text = PREFIX .. ascii_json(encoded)
     if #text > 1024 * 1024 then error("Color export exceeds the 1 MiB limit.") end
-    return text, #changes, skipped
+    return text, #changes, skipped, #export_objects
 end
 
 re.on_draw_ui(function()
@@ -181,13 +206,16 @@ re.on_draw_ui(function()
         local changed, new_index = imgui.combo("Character / mesh", selected_index, labels)
         if changed then selected_key, export_text, status = groups[new_index].key, "", "" end
         local group = groups[changed and new_index or selected_index]
-        imgui.text("Exports edited CustomizeColor_N RGBA only; includes EMV Change Multiple edits in cached meshes.")
+        imgui.text("Exports edited CustomizeColor_N and CMD hair colors, including EMV Change Multiple edits.")
+        if group.key:match("^mesh:") then
+            imgui.text("Character grouping unavailable. Open hair/head Materials, refresh characters, and export each mesh separately.")
+        end
         if imgui.button("Copy for Color Sync") then
-            local ok, text, count, skipped = pcall(build_export, group)
+            local ok, text, count, skipped, mesh_count = pcall(build_export, group)
             if ok then
                 export_text = text
                 local copy_ok, copy_result = pcall(sdk.copy_to_clipboard, text)
-                status = (copy_ok and copy_result == true) and ("Copied " .. count .. " color edits. Paste in Color Sync's Import Freecam Colors panel.")
+                status = (copy_ok and copy_result == true) and ("Copied " .. count .. " color edits from " .. mesh_count .. " mesh(es). Paste in Color Sync's Import Freecam Colors panel.")
                     or ("Clipboard copy failed. Copy the text below with Ctrl+A, Ctrl+C.")
                 if skipped > 0 then status = status .. " Skipped " .. skipped .. " unsupported or out-of-range fields." end
             else

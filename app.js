@@ -82,6 +82,7 @@ import {
     runtimeRgbaToCmdRgba,
 } from "./lib/sf6-color-space.js";
 import { MAX_FREECAM_COLOR_BYTES, exportCmdColorTransfer, parseFreecamColorTransfer, planFreecamColorImport } from "./lib/freecam-colors.js";
+import { cmdColorSlots, normalizeCmdColorParameter } from "./lib/sf6-shader-colors.js";
 
 
 // ============================================================
@@ -2339,7 +2340,7 @@ function synchronizeCmdInstanceCrcs(cmd) {
 
 function findSlotByOffset(cmdEntry, offset) {
     for (const cluster of cmdEntry.colorClusters) {
-        for (const color of cluster.colors) {
+        for (const color of cmdColorSlots(cluster)) {
             if (color.color?.absoluteOffset === offset) return { cluster, color };
         }
     }
@@ -2347,18 +2348,20 @@ function findSlotByOffset(cmdEntry, offset) {
 }
 
 function updateColorModelAtOffset(cmdEntry, offset, rgba) {
-    const found = findSlotByOffset(cmdEntry, offset);
-    if (!found?.color?.color) return;
-
-    const c = found.color.color;
-    c.r = clampByte(rgba[0]);
-    c.g = clampByte(rgba[1]);
-    c.b = clampByte(rgba[2]);
-    c.a = clampByte(rgba[3]);
-    c.hex = rgbaToHexString(rgba);
-    c.rawHex = rgba
-        .map(x => clampByte(x).toString(16).padStart(2, "0").toUpperCase())
-        .join(" ");
+    for (const cluster of cmdEntry.colorClusters) {
+        for (const slot of cmdColorSlots(cluster)) {
+            if (slot.color?.absoluteOffset !== offset) continue;
+            const c = slot.color;
+            c.r = clampByte(rgba[0]);
+            c.g = clampByte(rgba[1]);
+            c.b = clampByte(rgba[2]);
+            c.a = clampByte(rgba[3]);
+            c.hex = rgbaToHexString(rgba);
+            c.rawHex = rgba
+                .map(x => clampByte(x).toString(16).padStart(2, "0").toUpperCase())
+                .join(" ");
+        }
+    }
 }
 
 function forceEnableSlot(cmdEntry, slot) {
@@ -2422,6 +2425,18 @@ function applyColorEdit(color, rgba) {
     renderCurrentChanges();
     renderSyncPanels();
     updateExportButtons();
+}
+
+function setCmdColorParameter(cmd, materialName, parameter, rgba) {
+    const address = normalizeCmdColorParameter(parameter);
+    if (!address) return false;
+    if (address.kind === "customize") return setCmdColorSlot(cmd, materialName, address.index, rgba, { forceEnable: true });
+    const slot = getMaterial(cmd, materialName)?.shaderColors?.find(color => color.runtimeName === address.parameter);
+    if (!isSlotEditable(slot)) return false;
+    writeRgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset, rgba);
+    updateColorModelAtOffset(cmd, slot.color.absoluteOffset, rgba);
+    forceEnableSlot(cmd, slot);
+    return true;
 }
 
 
@@ -2932,13 +2947,15 @@ function getCurrentColorChanges() {
         const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
 
         for (const cluster of cmd.colorClusters) {
-            for (const color of cluster.colors) {
+            for (const color of cmdColorSlots(cluster)) {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
 
                 const beforeRgba = rgbaAtOffset(baseline, offset);
                 const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
-                if (rgbaEquals(beforeRgba, afterRgba)) continue;
+                const beforeEnabled = enabledAtOffset(baseline, color.enable?.absoluteOffset, color.enable?.byteLength);
+                const afterEnabled = enabledAtOffset(cmd.workingBuffer, color.enable?.absoluteOffset, color.enable?.byteLength);
+                if (rgbaEquals(beforeRgba, afterRgba) && beforeEnabled === afterEnabled) continue;
 
                 changes.push({
                     cmdIndex,
@@ -2950,6 +2967,8 @@ function getCurrentColorChanges() {
                     after: rgbaToHexString(afterRgba),
                     beforeRgba,
                     afterRgba,
+                    beforeEnabled,
+                    afterEnabled,
                     colorRef: color,
                 });
             }
@@ -2975,6 +2994,13 @@ function revertChange(cmdIndex, offset) {
     const original = rgbaAtOffset(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, offset);
     writeRgbaAtOffset(cmd.workingBuffer, offset, original);
     updateColorModelAtOffset(cmd, offset, original);
+    const slot = findSlotByOffset(cmd, offset)?.color;
+    const enabled = enabledAtOffset(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, slot?.enable?.absoluteOffset, slot?.enable?.byteLength);
+    if (enabled !== null) {
+        writeEnableAtOffset(cmd.workingBuffer, slot.enable.absoluteOffset, slot.enable.byteLength, enabled);
+        slot.enabled = enabled;
+        slot.enable.value = enabled;
+    }
     removeSurpriseSnapshotSlot(cmd, offset);
 
     renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
@@ -3035,7 +3061,7 @@ function findExactColorMatches(findRgba, { cmdIndex = null } = {}) {
         if (!cmd) continue;
 
         for (const cluster of cmd.colorClusters) {
-            for (const color of cluster.colors) {
+            for (const color of cmdColorSlots(cluster)) {
                 if (!isSlotEditable(color)) continue;
                 const current = slotRgba(color);
                 if (!rgbaEquals(current, findRgba)) continue;
@@ -3249,7 +3275,7 @@ function revertAllChanges() {
         working.set(new Uint8Array(baseline));
 
         for (const cluster of cmd.colorClusters) {
-            for (const color of cluster.colors) {
+            for (const color of cmdColorSlots(cluster)) {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
                 const rgba = rgbaAtOffset(baseline, offset);
@@ -3311,6 +3337,11 @@ function renderCurrentChanges() {
                 + ` → `
                 + `<span class="color-inline"><span class="swatch-inline" style="background:${change.after}"></span>${change.after} <em>(${describeColorName(change.afterRgba)})</em></span>`
                 + `</div>`;
+            if (change.beforeEnabled !== change.afterEnabled) {
+                const activeState = document.createElement("div");
+                activeState.textContent = `Active: ${change.beforeEnabled ? "Yes" : "No"} → ${change.afterEnabled ? "Yes" : "No"}`;
+                meta.appendChild(activeState);
+            }
 
             const afterBtn = document.createElement("button");
             afterBtn.type = "button";
@@ -3370,7 +3401,7 @@ const COLOR_STATE_VERSION = 1;
 const MAX_COLOR_STATE_BYTES = 16 * 1024 * 1024;
 
 function editableColorStateSlots(cmd) {
-    return cmd.colorClusters.flatMap((cluster, clusterIndex) => cluster.colors
+    return cmd.colorClusters.flatMap((cluster, clusterIndex) => cmdColorSlots(cluster)
         .filter(isSlotEditable)
         .map(slot => ({ cluster, clusterIndex, slot })));
 }
@@ -3471,7 +3502,8 @@ function validateColorStateDocument(document) {
             throw new Error(`Color data is missing for ${savedCmd.filename || identity}.`);
         }
 
-        const expectedSlots = editableColorStateSlots(cmd);
+        const legacySlots = savedCmd.slots.every(slot => Number.isInteger(slot?.slotIndex));
+        const expectedSlots = editableColorStateSlots(cmd).filter(({ slot }) => !legacySlots || slot.kind !== "hair");
         if (savedCmd.slots.length !== expectedSlots.length) {
             throw new Error(
                 `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
@@ -3480,13 +3512,17 @@ function validateColorStateDocument(document) {
 
         const seenTargets = new Set();
         for (const savedSlot of savedCmd.slots) {
-            const { clusterIndex, material, slotIndex, rgba, enabled } = savedSlot || {};
-            if (!Number.isInteger(clusterIndex) || clusterIndex < 0 || !Number.isInteger(slotIndex)) {
+            const { clusterIndex, material, slotIndex, runtimeName, rgba, enabled } = savedSlot || {};
+            const address = normalizeCmdColorParameter(slotIndex === null ? runtimeName : `CustomizeColor_${slotIndex}`);
+            if (!Number.isInteger(clusterIndex) || clusterIndex < 0 || !address
+                || (slotIndex === null ? address.kind !== "hair" : !Number.isInteger(slotIndex))) {
                 throw new Error(`The color state has an invalid slot address in ${savedCmd.filename || identity}.`);
             }
             const cluster = cmd.colorClusters[clusterIndex];
-            const slot = cluster?.colors.find(candidate => candidate.index === slotIndex);
-            const targetKey = `${clusterIndex}|${slotIndex}`;
+            const slot = address.kind === "hair"
+                ? cluster?.shaderColors?.find(candidate => candidate.runtimeName === address.parameter)
+                : cluster?.colors.find(candidate => candidate.index === slotIndex);
+            const targetKey = `${clusterIndex}|${address.parameter}`;
             if (!cluster || cluster.name !== material || !isSlotEditable(slot) || seenTargets.has(targetKey)) {
                 throw new Error(
                     `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
@@ -3679,7 +3715,7 @@ function applyFreecamColors() {
     if (!operations.length) throw new Error("No matching colors need to change.");
     const beforeBuffer = cmd.workingBuffer.slice(0);
     for (const operation of operations) {
-        setCmdColorSlot(cmd, operation.material, operation.slotIndex, operation.rgba, { forceEnable: true });
+        setCmdColorParameter(cmd, operation.material, operation.parameter, operation.rgba);
         removeSurpriseSnapshotSlot(cmd, operation.slot.color.absoluteOffset);
     }
     freecamUndo = { cmd, clusters: cmd.colorClusters, beforeBuffer, afterBuffer: cmd.workingBuffer.slice(0), slots: operations.map(operation => operation.slot), wasDirty: state.inspectorDirty };
@@ -3783,7 +3819,7 @@ function semanticChangesSince(cmd, baseline) {
     const colorBaseline = baseline.byteLength === cmd.workingBuffer.byteLength
         ? baseline
         : (cmd.semanticBaselineBuffer ?? baseline);
-    for (const cluster of cmd.colorClusters) for (const slot of cluster.colors) {
+    for (const cluster of cmd.colorClusters) for (const slot of cmdColorSlots(cluster)) {
         const offset = slot.color?.absoluteOffset;
         if (!Number.isInteger(offset)) continue;
         const beforeRgba = rgbaAtOffset(colorBaseline, offset);
@@ -6123,9 +6159,18 @@ function renderColorClusters(clusters) {
         const list = document.createElement("div");
         list.className = "cluster-slot-list";
 
-        for (const color of cluster.colors) {
+        const shaderDetails = document.createElement("details");
+        shaderDetails.className = "shader-color-details";
+        const shaderSummary = document.createElement("summary");
+        shaderSummary.textContent = "CMD hair shader colors";
+        const shaderList = document.createElement("div");
+        shaderList.className = "cluster-slot-list shader-color-list";
+        shaderDetails.append(shaderSummary, shaderList);
+
+        for (const color of cmdColorSlots(cluster)) {
             const row = document.createElement("div");
             row.className = "cluster-slot-row";
+            row.dataset.parameter = color.runtimeName;
             if (!isSlotEnabled(color)) row.classList.add("inactive-slot");
             if (!isSlotEditable(color)) row.classList.add("readonly-slot");
 
@@ -6207,10 +6252,11 @@ function renderColorClusters(clusters) {
             if (isSlotEditable(color)) hexControl.append(createHexActionButtons());
 
             row.append(swatch, name, friendly, hexControl, flags);
-            list.appendChild(row);
+            (color.kind === "hair" ? shaderList : list).appendChild(row);
         }
 
         card.appendChild(list);
+        if (cluster.shaderColors?.length) card.appendChild(shaderDetails);
         clusterInspector.appendChild(card);
     }
 }
@@ -7270,7 +7316,7 @@ function bindUi() {
         const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
         new Uint8Array(cmd.workingBuffer).set(new Uint8Array(baseline));
         for (const cluster of cmd.colorClusters) {
-            for (const color of cluster.colors) {
+            for (const color of cmdColorSlots(cluster)) {
                 const offset = color.color?.absoluteOffset;
                 if (!Number.isInteger(offset)) continue;
                 updateColorModelAtOffset(
@@ -7278,6 +7324,11 @@ function bindUi() {
                     offset,
                     rgbaAtOffset(baseline, offset),
                 );
+                const enabled = enabledAtOffset(baseline, color.enable?.absoluteOffset, color.enable?.byteLength);
+                if (enabled !== null) {
+                    color.enabled = enabled;
+                    color.enable.value = enabled;
+                }
             }
         }
 

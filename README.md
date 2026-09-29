@@ -84,15 +84,18 @@ in your game's `reframework/autorun` folder. Open Materials before editing color
 open REFramework's **SF6 Color Sync** panel, and click **Copy for Color Sync**.
 In section 2 of the browser editor, use **Import Freecam Colors** to paste,
 preview, and apply the supported slots to the active CMD of your choice.
-Material names and CustomizeColor indexes determine matches. Export normally.
+Material names and supported color parameter names determine matches. Alongside
+CustomizeColor slots, Ingrid's CMD hair specular, occlusion, and rim-light colors
+are supported. BaseColor belongs to the MDF and is omitted. Export normally.
 See the [setup and format guide](integrations/reframework/README.md).
 
 ## Copyable color exports
 
 In section 2, select the active color and open **Export Colors as String**.
 Use **Generate String** to view the export, or **Copy String** to generate and
-copy it directly. The export includes every active supported CustomizeColor
-slot from the working CMD, including applied edits. Inactive slots are omitted.
+copy it directly. The export includes every active supported color field
+from the working CMD, including CustomizeColor slots, CMD hair colors, and
+applied edits. Inactive fields are omitted.
 Paste the string into **Import Freecam Colors**, preview it for your chosen
 CMD, then apply. RGB and alpha survive an export/import round trip exactly.
 

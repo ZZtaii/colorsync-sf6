@@ -16,13 +16,16 @@ This companion script reads EMV's cached material values and adds an
 **SF6 Color Sync** panel under REFramework's Script Generated UI.
 
 1. Open the character's **Materials** editor in EMV / Freecam, then edit its
-   `CustomizeColor_N` colors normally. Open each mesh's Materials editor for
+   `CustomizeColor_N` or supported CMD hair colors normally. Open each mesh's Materials editor for
    meshes you want to include. EMV's **Change Multiple** edits are included
    when its affected meshes are in the material cache.
 2. Open **SF6 Color Sync**, click **Refresh characters**, and select the
    character. When a PlayerColorController is available, cached meshes belonging
    to the same character are grouped together. Otherwise, select individual
    meshes and export/import them separately.
+   Each copy scans the current cache, including meshes opened since the last
+   refresh. If character grouping is unavailable, refresh after opening a new
+   mesh so it appears in the picker, then export that mesh separately.
 3. Click **Copy for Color Sync**. This exports only color values that differ
    from EMV's original cached values. Unchanged values are omitted, so inactive
    CMD slots do not get enabled unnecessarily. Open EMV before editing; changes
@@ -41,12 +44,20 @@ click **Save color export JSON** and import
 ## Supported data
 
 - Exact material names and `CustomizeColor_N` indexes.
+- CMD hair colors: `PrimalySpecularColor` (primary specular),
+  `SecondarySpecularColor`, `OcclusionColor`, and `RimLight_Color`.
+  These support Ingrid's hair and any material using the corresponding CMD
+  Hair fields. The browser exposes them under **CMD hair shader colors**.
+  CMD spelling aliases `OcclutionColor` and `Rimlight_Color`, and
+  `PrimarySpecularColor`, are accepted and normalized by name.
+- `BaseColor` has no CMD Hair field and is omitted. Persisting it would require
+  an MDF edit shared by palettes using that MDF; this bridge edits CMDs only.
 - RGBA vectors between 0 and 1, exported as original runtime floats.
 - RGB converts from linear runtime values directly into sRGB CMD bytes, with
   rounding only at the final byte write. Alpha is scaled directly to 0–255.
 - Matching target slots are enabled when their enable field is writable.
 - Choose any loaded CMD as the target. Import modifies only that active CMD,
-  matching exact material names and CustomizeColor indexes. The exporter does
+  matching exact material names and supported color parameter names. The exporter does
   not detect the source palette, and the browser ignores palette metadata in
   older exports.
 - Missing materials/slots, ambiguous CMD material names and conflicting
@@ -88,12 +99,23 @@ The browser validates the whole payload before any edits. Maximum: 1 MiB and
 4096 changes. Identical copies from multiple meshes combine into one slot;
 different values for the same material/index are skipped rather than guessed.
 
+`skippedFields` counts unsupported or out-of-range edits in the scanned meshes.
+It does not count meshes that EMV has not cached, unchanged colors, or slots
+without an original cached value. Hair slots listed in a CMD may belong to a
+different in-game mesh from the clothing: open that mesh's Materials editor
+before editing and copying its colors.
+
 ## Validation status
 
 The bridge targets the EMV Engine SILVER `Material` cache inspected from
 version `2.0.73-SILVER` and REFramework's Lua APIs. Automated checks use mocked
 REFramework/EMV objects and real CMD samples. Version 1.0 was also confirmed
 working in-game by the user; version 1.1 removes automatic palette detection.
+Version 1.2 scans newly cached meshes on every copy and rejects obsolete cache
+wrappers, with regression checks for hair opened after character refresh.
+Version 1.3 adds the four named CMD hair colors. Checks cover real Ingrid CMD
+offsets, active flags, byte-preserving export/import, undo, and browser edits.
+The new runtime fields still need in-game confirmation with exporter 1.3.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).
