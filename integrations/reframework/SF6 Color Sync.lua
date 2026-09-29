@@ -1,4 +1,4 @@
--- SF6 Color Sync clipboard bridge v1.3
+-- SF6 Color Sync clipboard bridge v1.4
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
@@ -92,14 +92,32 @@ local function refresh_player_roots()
     end
 end
 
-local function costume_for(object)
+local function character_id(text)
+    -- Runtime object names often expose only esf032v00, without a resource path.
+    -- Require exactly three ID digits; esf0320 is not Ingrid's esf032.
+    return type(text) == "string" and text:lower():match("%f[%w](esf%d%d%d)%f[%D]") or nil
+end
+
+local function resource_for(object)
     local paths = object.mpaths or {}
-    for _, path in ipairs({ paths.mesh_path or "", object.mesh_name or "", paths.mdf2_path or "" }) do
+    local resources = { paths.mesh_path or "", object.mesh_name or "", paths.mdf2_path or "" }
+    for _, path in ipairs(resources) do
         if type(path) == "string" then
             local normalized = path:lower():gsub("\\", "/")
             local id, costume = normalized:match("product/model/esf/(esf%d%d%d)/(%d%d%d)/")
             if id then return id, costume, path end
         end
+    end
+    -- A filename can identify the costume when EMV omits its directories.
+    for _, path in ipairs(resources) do
+        if type(path) == "string" then
+            local id, costume = path:lower():match("%f[%w](esf%d%d%d)_(%d%d%d)_")
+            if id then return id, costume, path end
+        end
+    end
+    for _, path in ipairs(resources) do
+        local id = character_id(path)
+        if id then return id end
     end
 end
 
@@ -111,13 +129,15 @@ local function transform_name(xform)
 end
 
 local function context_for(object)
-    local id, costume, resource_path = costume_for(object)
+    local id, costume, resource_path = resource_for(object)
+    id = id or character_id(object.name) or character_id(object.name_w_parent)
     local xform = object.xform
     local controller_root, actor_root, player_label
     for _ = 1, 32 do
         if not xform then break end
         local address = tostring(xform:get_address())
         local name = transform_name(xform)
+        id = id or character_id(name)
         if player_roots[address] or name == "P1" or name == "P2" then
             actor_root, player_label = xform, player_roots[address] or name
             break
@@ -133,15 +153,22 @@ local function context_for(object)
     local owner = actor_root or controller_root
     local address = tostring((owner or object.xform):get_address())
     local owner_name = owner and transform_name(owner) or object.name_w_parent or object.name or "Selected mesh"
-    local costume_label = id and ((character_names[id] or id) .. " C" .. tonumber(costume)) or "Costume unknown"
+    local character_label = character_names[id] or (id and ("Unknown character (" .. id .. ")")) or "Unknown character"
+    local costume_label = character_label .. (costume and (" C" .. tonumber(costume)) or " (costume unknown)")
     local label = (player_label and (player_label .. " - ") or "") .. costume_label
-    if not player_label then label = label .. " - " .. (owner_name or "Character") .. " #" .. address end
+    if not player_label then
+        -- Keep useful custom object names, but avoid repeating raw esf names
+        -- after the friendly character label. The address distinguishes actors.
+        local owner_label = character_id(owner_name) and (owner and "Character" or "Mesh") or owner_name
+        label = label .. " - " .. (owner_label or "Character") .. " #" .. address
+    end
     local source = { object = label }
     local main_material = false
     for _, material in ipairs(object.materials or {}) do
         if material.name == "esf_Body00" then main_material = true end
     end
-    local info = { title = label, resource = resource_path, priority = id and (main_material and 2 or 1) or 0 }
+    local info = { title = label, resource = resource_path,
+        priority = id and ((main_material and 4 or 0) + (costume and 2 or 1)) or 0 }
     -- Known actors own their hair/head even when those parts reuse resources
     -- from another costume. Resource partitioning is only a controller fallback.
     local key = actor_root and ("actor:" .. address)

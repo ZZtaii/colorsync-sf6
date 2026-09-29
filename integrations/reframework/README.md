@@ -27,8 +27,11 @@ This companion script reads EMV's cached material values and adds an
    resources; the main body resource supplies the label when available.
    Without player roots, groups use the controller and costume resource.
    If neither is available, select individual meshes and export/import separately.
-   Unknown costumes are labeled honestly; unidentified players include their
-   object name and address so duplicate names remain distinguishable.
+   Character names are also recognized from resource filenames, mesh names,
+   and parent object names when full paths are unavailable, for example
+   **Ingrid (costume unknown)**. Runtime names such as `esf032v00` identify
+   Ingrid but do not identify her costume. Unidentified players include a
+   unique object address so duplicate names remain distinguishable.
    Each copy scans the current cache, including meshes opened since the last
    refresh. If character grouping is unavailable, refresh after opening a new
    mesh so it appears in the picker, then export that mesh separately.
@@ -123,7 +126,9 @@ Version 1.3 adds the four named CMD hair colors. Checks cover real Ingrid CMD
 offsets, active flags, byte-preserving export/import, undo, and browser edits.
 Its dropdown identifies player/costume groups and guards shared controllers,
 identical raw mesh names, and shared hair resources.
-The new runtime fields still need in-game confirmation with exporter 1.3.
+Version 1.4 resolves friendly character names from partial resources and runtime
+object names too. Checks cover every mapped character, unknown IDs, and names
+without costume information. The new runtime fields still need in-game confirmation.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).
