@@ -289,6 +289,50 @@
                 </div>
             </div>
 
+            <details id="freecam-import-panel" class="collapsible-section freecam-import-panel">
+                <summary class="collapsible-section-summary">
+                    <span>Import Freecam Colors</span>
+                    <span class="collapsible-section-hint">Freecam or Color Sync strings</span>
+                </summary>
+                <div class="collapsible-section-body">
+                    <p>Paste a color string from Color Sync or use <strong>Copy for Color Sync</strong> in REFramework’s SF6 Color Sync panel after editing in EMV / Lua Freecam. Preview and apply the colors to the active CMD.</p>
+                    <p class="freecam-setup-link"><a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Download the exporter on Nexus Mods</a> · <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a> · <a href="./integrations/reframework/" target="_blank" rel="noopener">Quick setup guide</a></p>
+                    <p>Once EMV Engine and Lua Freecam are set up, enable the exporter ZIP in Fluffy. Open Materials before editing, then use <strong>SF6 Color Sync → Refresh characters → Copy for Color Sync</strong> in REFramework.</p>
+                    <p>Choose the active CMD you want to update. Matching material and CustomizeColor slots will receive the imported colors.</p>
+                    <textarea id="freecam-color-text" rows="4" aria-label="Color import string" spellcheck="false" placeholder="Paste the complete SF6COLORS:1: export string here"></textarea>
+                    <div class="freecam-import-actions">
+                        <button id="paste-freecam-colors" type="button" class="secondary-button" disabled>Paste from Clipboard</button>
+                        <button id="preview-freecam-colors" type="button" class="secondary-button" disabled>Preview Colors</button>
+                        <button id="load-freecam-colors" type="button" class="secondary-button" disabled>Load Export JSON</button>
+                        <input id="freecam-color-file" type="file" accept=".json,.txt,application/json,text/plain" class="hidden">
+                    </div>
+                    <div id="freecam-color-status" class="status-box hidden" role="status" aria-live="polite"></div>
+                    <div id="freecam-color-preview" aria-live="polite"></div>
+                    <div class="freecam-import-actions">
+                        <button id="apply-freecam-colors" type="button" class="primary-button" disabled>Apply to Active CMD</button>
+                        <button id="undo-freecam-colors" type="button" class="secondary-button" disabled>Undo Last Import</button>
+                    </div>
+                </div>
+            </details>
+
+            <details id="color-string-export-panel" class="collapsible-section color-string-export-panel">
+                <summary class="collapsible-section-summary">
+                    <span>Export Colors as String</span>
+                    <span class="collapsible-section-hint">copy the active CMD’s colors</span>
+                </summary>
+                <div class="collapsible-section-body">
+                    <p>Export all active CustomizeColor slots from the selected CMD, including applied edits. Paste the string into <strong>Import Freecam Colors</strong> for any CMD you choose.</p>
+                    <p id="color-string-export-help" class="freecam-setup-link">Inactive slots are omitted. Matching slots become active when imported.</p>
+                    <div class="freecam-import-actions">
+                        <button id="generate-color-string" type="button" class="secondary-button" disabled>Generate String</button>
+                        <button id="copy-color-string" type="button" class="secondary-button" disabled>Copy String</button>
+                    </div>
+                    <div id="color-string-status" class="status-box hidden" role="status" aria-live="polite"></div>
+                    <label for="color-string-output">Copyable color string</label>
+                    <textarea id="color-string-output" rows="4" readonly spellcheck="false" aria-describedby="color-string-export-help" placeholder="Load a CMD, choose its active color, then generate or copy its color string."></textarea>
+                </div>
+            </details>
+
             <details
                 id="parsed-data-details"
                 class="collapsible-section"
