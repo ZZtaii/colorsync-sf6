@@ -1,9 +1,28 @@
--- SF6 Color Sync clipboard bridge v1.1
+-- SF6 Color Sync clipboard bridge v1.3
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
 local selected_key, export_text, status = nil, "", ""
 local groups = {}
+local player_roots = {}
+local character_names = {
+    esf001="Ryu", esf002="Luke", esf003="Kimberly", esf004="Chun-Li", esf005="Manon",
+    esf006="Zangief", esf007="JP", esf008="Dhalsim", esf009="Cammy", esf010="Ken",
+    esf011="Dee Jay", esf012="Lily", esf013="A.K.I", esf014="Rashid", esf015="Blanka",
+    esf016="Juri", esf017="Marisa", esf018="Guile", esf019="Ed", esf020="E. Honda",
+    esf021="Jamie", esf022="Akuma", esf025="Sagat", esf026="M. Bison", esf027="Terry",
+    esf028="Mai", esf029="Elena", esf030="C.Viper", esf031="Alex", esf032="Ingrid", esf033="Yasmine",
+}
+local hair_parameters = {
+    OcclusionColor = "OcclusionColor", OcclutionColor = "OcclusionColor",
+    PrimalySpecularColor = "PrimalySpecularColor", PrimarySpecularColor = "PrimalySpecularColor",
+    SecondarySpecularColor = "SecondarySpecularColor",
+    RimLight_Color = "RimLight_Color", Rimlight_Color = "RimLight_Color",
+}
+
+local function color_parameter(name)
+    return name:match("^CustomizeColor_%d+$") and name or hair_parameters[name]
+end
 
 local function rgba(value)
     if not value then return nil end
@@ -61,29 +80,80 @@ local function controller_for(xform)
     end
 end
 
-local function context_for(object)
-    local source = { object = object.name_w_parent or object.name or "Selected mesh" }
-    local xform = object.xform
-    for _ = 1, 16 do
-        if not xform then break end
-        local ok, controller = pcall(controller_for, xform)
-        if ok and controller then
-            -- The controller identifies the owning player for mesh grouping.
-            -- Destination CMD selection belongs to the user in Color Sync.
-            return tostring(xform:get_address()), source
+local function refresh_player_roots()
+    player_roots = {}
+    -- Lua Freecam already enumerates PlayerBehavior components in this order.
+    -- Read its actors without initializing EMV wrappers or material caches.
+    for index, player_behavior in ipairs(type(players) == "table" and players or {}) do
+        local ok, address = pcall(function()
+            return tostring(player_behavior:call("get_GameObject"):call("get_Transform"):get_address())
+        end)
+        if ok then player_roots[address] = "P" .. index end
+    end
+end
+
+local function costume_for(object)
+    local paths = object.mpaths or {}
+    for _, path in ipairs({ paths.mesh_path or "", object.mesh_name or "", paths.mdf2_path or "" }) do
+        if type(path) == "string" then
+            local normalized = path:lower():gsub("\\", "/")
+            local id, costume = normalized:match("product/model/esf/(esf%d%d%d)/(%d%d%d)/")
+            if id then return id, costume, path end
         end
+    end
+end
+
+local function transform_name(xform)
+    local cached = held_transforms and held_transforms[xform]
+    if cached and cached.name then return cached.name end
+    local ok, name = pcall(function() return xform:call("get_GameObject"):call("get_Name") end)
+    return ok and type(name) == "string" and name or nil
+end
+
+local function context_for(object)
+    local id, costume, resource_path = costume_for(object)
+    local xform = object.xform
+    local controller_root, actor_root, player_label
+    for _ = 1, 32 do
+        if not xform then break end
+        local address = tostring(xform:get_address())
+        local name = transform_name(xform)
+        if player_roots[address] or name == "P1" or name == "P2" then
+            actor_root, player_label = xform, player_roots[address] or name
+            break
+        end
+        local ok, controller = pcall(controller_for, xform)
+        if ok and controller and not controller_root then controller_root = xform end
         local parent_ok, parent = pcall(function() return xform:call("get_Parent") end)
         if not parent_ok then break end
         xform = parent
     end
+    -- Actor roots take precedence over a controller shared by multiple actors.
+    -- Partition by loaded costume resources too; neither key restricts import.
+    local owner = actor_root or controller_root
+    local address = tostring((owner or object.xform):get_address())
+    local owner_name = owner and transform_name(owner) or object.name_w_parent or object.name or "Selected mesh"
+    local costume_label = id and ((character_names[id] or id) .. " C" .. tonumber(costume)) or "Costume unknown"
+    local label = (player_label and (player_label .. " - ") or "") .. costume_label
+    if not player_label then label = label .. " - " .. (owner_name or "Character") .. " #" .. address end
+    local source = { object = label }
+    local main_material = false
+    for _, material in ipairs(object.materials or {}) do
+        if material.name == "esf_Body00" then main_material = true end
+    end
+    local info = { title = label, resource = resource_path, priority = id and (main_material and 2 or 1) or 0 }
+    -- Known actors own their hair/head even when those parts reuse resources
+    -- from another costume. Resource partitioning is only a controller fallback.
+    local key = actor_root and ("actor:" .. address)
+        or ((owner and "controller:" or "mesh:") .. address .. "|" .. (id or "unknown") .. "|" .. (costume or "unknown"))
     -- Missing controller: keep meshes separate rather than mix two players.
-    return "mesh:" .. tostring(object.xform:get_address()), source
+    return key, source, info
 end
 
 local function has_colors(object)
     for _, material in ipairs(object.materials or {}) do
         for _, name in ipairs(material.variable_names or {}) do
-            if name:match("^CustomizeColor_%d+$") then return true end
+            if color_parameter(name) then return true end
         end
     end
     return false
@@ -91,22 +161,23 @@ end
 
 local function refresh_groups()
     export_text, status = "", ""
+    refresh_player_roots()
     local found = {}
     for _, object in pairs(held_transforms or {}) do
-        local ok, key, source = pcall(function()
+        local ok, key, source, info = pcall(function()
             if not object.xform or not has_colors(object) then return end
-            local owner_key, owner_source = context_for(object)
-            return owner_key, owner_source
+            return context_for(object)
         end)
         if ok and key then
-            local group = found[key] or { key = key, source = source, objects = {} }
+            local group = found[key] or { key = key, source = source, info = info, objects = {} }
+            if info.priority > group.info.priority then group.source, group.info = source, info end
             found[key] = group
             group.objects[#group.objects + 1] = object
         end
     end
     groups = {}
     for _, group in pairs(found) do
-        group.label = group.source.object
+        group.label = group.info.title .. " (" .. #group.objects .. " cached meshes)"
         groups[#groups + 1] = group
     end
     table.sort(groups, function(a, b) return a.label < b.label end)
@@ -116,23 +187,39 @@ local function refresh_groups()
 end
 
 local function build_export(group)
+    refresh_player_roots()
     local changes, skipped, stale = {}, 0, 0
-    local source
+    local source, info
     for _, object in ipairs(group.objects) do
-        local ok, key, current_source = pcall(context_for, object)
-        if not ok or key ~= group.key then
+        local ok, key = pcall(context_for, object)
+        if not ok or key ~= group.key or held_transforms[object.xform] ~= object then
             stale = stale + 1
-        else
-            source = source or current_source
+        end
+    end
+    if stale > 0 then error("Character objects changed. Refresh characters and export again.") end
+    -- EMV adds meshes to its cache as their Materials panels are opened. The
+    -- character picker is a snapshot, but Copy must include newly cached hair
+    -- and head meshes belonging to the selected player. Never create wrappers
+    -- or refresh materials here: that could replace EMV's original colors.
+    local export_objects = {}
+    for _, object in pairs(held_transforms or {}) do
+        local ok, key, current_source, current_info = pcall(function()
+            if not object.xform or not has_colors(object) then return end
+            return context_for(object)
+        end)
+        if ok and key == group.key then
+            export_objects[#export_objects + 1] = object
+            if not info or current_info.priority > info.priority then source, info = current_source, current_info end
             for _, material in ipairs(object.materials or {}) do
                 for index, parameter in ipairs(material.variable_names or {}) do
                     local current = material.variables and material.variables[index]
                     local original = material.orig_vars and material.orig_vars[index]
                     if current ~= nil and original ~= nil and differs(current, original) then
                         local color = rgba(current)
-                        if parameter:match("^CustomizeColor_%d+$") and color and in_range(color) then
+                        local supported_parameter = color_parameter(parameter)
+                        if supported_parameter and color and in_range(color) then
                             changes[#changes + 1] = {
-                                material = material.name, parameter = parameter, rgba = color,
+                                material = material.name, parameter = supported_parameter, rgba = color,
                                 mesh = object.name_w_parent or object.name or "",
                             }
                         else
@@ -143,8 +230,10 @@ local function build_export(group)
             end
         end
     end
-    if stale > 0 then error("Character objects changed. Refresh characters and export again.") end
-    if #changes == 0 then error("No edited CustomizeColor slots found. Open the character's Materials editor in EMV and make your color changes first.") end
+    group.objects = export_objects
+    if info then group.source, group.info = source, info end
+    group.label = group.info.title .. " (" .. #export_objects .. " cached meshes)"
+    if #changes == 0 then error("No edited supported CMD colors found. Use CustomizeColor_N or CMD hair colors; BaseColor requires an MDF edit.") end
     if #changes > 4096 then error("Too many edits for one export (maximum 4096).") end
     table.sort(changes, function(a, b)
         local a_key, b_key = a.material .. "|" .. a.parameter .. "|" .. a.mesh, b.material .. "|" .. b.parameter .. "|" .. b.mesh
@@ -157,7 +246,7 @@ local function build_export(group)
     if type(encoded) ~= "string" or encoded == "" then error("REFramework could not encode the color export.") end
     local text = PREFIX .. ascii_json(encoded)
     if #text > 1024 * 1024 then error("Color export exceeds the 1 MiB limit.") end
-    return text, #changes, skipped
+    return text, #changes, skipped, #export_objects
 end
 
 re.on_draw_ui(function()
@@ -181,13 +270,18 @@ re.on_draw_ui(function()
         local changed, new_index = imgui.combo("Character / mesh", selected_index, labels)
         if changed then selected_key, export_text, status = groups[new_index].key, "", "" end
         local group = groups[changed and new_index or selected_index]
-        imgui.text("Exports edited CustomizeColor_N RGBA only; includes EMV Change Multiple edits in cached meshes.")
+        if group.info.resource then imgui.text("Costume resource: " .. group.info.resource) end
+        imgui.text("Only this entry's cached meshes are exported. Open both players' Materials, then Refresh characters to list both.")
+        imgui.text("Exports edited CustomizeColor_N and CMD hair colors, including EMV Change Multiple edits.")
+        if group.key:match("^mesh:") then
+            imgui.text("Character grouping unavailable. Open hair/head Materials, refresh characters, and export each mesh separately.")
+        end
         if imgui.button("Copy for Color Sync") then
-            local ok, text, count, skipped = pcall(build_export, group)
+            local ok, text, count, skipped, mesh_count = pcall(build_export, group)
             if ok then
                 export_text = text
                 local copy_ok, copy_result = pcall(sdk.copy_to_clipboard, text)
-                status = (copy_ok and copy_result == true) and ("Copied " .. count .. " color edits. Paste in Color Sync's Import Freecam Colors panel.")
+                status = (copy_ok and copy_result == true) and ("Copied " .. count .. " color edits from " .. mesh_count .. " mesh(es). Paste in Color Sync's Import Freecam Colors panel.")
                     or ("Clipboard copy failed. Copy the text below with Ctrl+A, Ctrl+C.")
                 if skipped > 0 then status = status .. " Skipped " .. skipped .. " unsupported or out-of-range fields." end
             else
