@@ -47,6 +47,9 @@ to a server.
 
 - Import a mod ZIP up to 200 MiB and preserve its metadata, screenshot, and
   unrelated archive files byte-for-byte.
+- Preserve the imported ZIP's entry order during background decompression and
+  full export. When no entries are removed, existing positions stay intact;
+  new files are appended.
 - Keep CMD palettes already supplied by a mod and fill only missing standard
   Colors 1-10 from
   [SF6 Colors.zip](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
@@ -63,6 +66,11 @@ to a server.
   dependent bundle variants require the full mod ZIP.
 - Optionally save CMD and ZIP exports directly to remembered folders in
   Chromium browsers; other browsers use normal downloads.
+
+When updating a mod already installed in Fluffy, disable its components before
+replacing the ZIP, refresh the mod list, then enable them again. If an earlier
+export was installed with mismatched cached file indexes, use a newly named
+replacement ZIP after removing the old archive from the Mods folder.
 
 ## Basic workflow
 

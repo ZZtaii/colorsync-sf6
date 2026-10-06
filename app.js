@@ -29,7 +29,7 @@
 // See AGENTS.md for product rules and architecture notes.
 // ============================================================
 
-import { unzip } from "./lib/fflate.js";
+import { readCompressedZip as unzipArchive } from "./lib/zip-import.js";
 import { createCompressedZip } from "./lib/zip-archive.js";
 import {
     colorsOnlyZipFilename,
@@ -1167,15 +1167,6 @@ function sortCmdEntriesInPlace() {
 
     state.cmdEntries = decorated.map(entry => entry.cmd);
     state.files = decorated.map(entry => entry.file);
-}
-
-function unzipArchive(bytes) {
-    return new Promise((resolve, reject) => {
-        unzip(bytes, (error, files) => {
-            if (error) reject(error);
-            else resolve(files);
-        });
-    });
 }
 
 function setZipImportProgress(label, percent = 0, { indeterminate = false } = {}) {
