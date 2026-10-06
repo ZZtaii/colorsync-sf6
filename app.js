@@ -58,6 +58,7 @@ import {
     summarizeSf6ColorClusters,
 } from "./lib/sf6-colors.js";
 import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
+import { discoverMaterialDefaultTargets, writeMaterialDefaultColor } from "./lib/material-default-edits.js";
 import {
     loadDefaultMdfColorMaterials,
     mergeMdfColorMaterials,
@@ -190,6 +191,8 @@ const state = {
     rememberedColorLibraryFile: null,
     customMdfMaterials: [],
     customMaterialMappings: [],
+    materialDefaultTargets: [],
+    materialDefaultBuffers: new Map(),
 
     syncMode: "color", // "color" | "pattern" | "duplicate"
 
@@ -517,6 +520,7 @@ function isSlotEditable(slot) {
         && !slot.error
         && slot.color
         && Number.isInteger(slot.color.absoluteOffset)
+        && !slot.materialEditBlockedReason
     );
 }
 
@@ -1534,52 +1538,34 @@ function chooseEditableCmdTarget(targets, entries) {
 function discoverMdfColorMaterials(entries, { esfId, costumeFolder } = {}) {
     if (!entries || !esfId || !costumeFolder) return [];
     const materialMap = new Map();
-    const sourceFolders = costumeFolder === "000"
-        ? "000"
-        : `(?:${costumeFolder}|000)`;
-    const modelPathRe = new RegExp(
-        `(?:^|/)natives/stm/(?:streaming/)?product/model/esf/${esfId}/${sourceFolders}/`,
-        "i",
-    );
-    const selectedRoot = state.importedMod?.selectedRoot;
-
-    for (const [path, bytes] of Object.entries(entries)) {
-        if (selectedRoot != null && !path.startsWith(selectedRoot)) continue;
-        if (!modelPathRe.test(path) || !/\.mdf2\.\d+$/i.test(path)) continue;
-        try {
-            const buffer = bytes.buffer.slice(
-                bytes.byteOffset,
-                bytes.byteOffset + bytes.byteLength,
-            );
-            for (const material of parseMdfMaterialNames(buffer, zipEntryBaseName(path))) {
-                if (!material.name || !material.customizeColorIndexes.length) continue;
-                const current = materialMap.get(material.name) ?? {
-                    name: material.name,
-                    customizeColorIndexes: new Set(),
-                    paths: [],
-                    defaultVariants: [],
-                    source: "mod",
-                };
-                material.customizeColorIndexes.forEach(index => current.customizeColorIndexes.add(index));
-                current.paths.push(path);
-                const defaultVariant = {
-                    path,
-                    materialIndex: material.materialIndex,
-                    customizeColors: material.customizeColors.map(color => ({
-                        index: color.index,
-                        linearRgba: color.linearRgba.slice(),
-                        cmdRgba: color.cmdRgba.slice(),
-                    })),
-                };
-                const signature = JSON.stringify(defaultVariant.customizeColors.map(color => [color.index, color.cmdRgba]));
-                if (!current.defaultVariants.some(variant => variant.signature === signature)) {
-                    current.defaultVariants.push({ ...defaultVariant, signature });
-                }
-                materialMap.set(material.name, current);
-            }
-        } catch (error) {
-            console.warn(`Could not inspect MDF materials in ${path}:`, error);
+    for (const material of discoverMaterialDefaultTargets(entries, {
+        selectedRoot: state.importedMod?.selectedRoot, esfId, costumeFolder,
+    })) {
+        const path = material.sourcePath;
+        if (!material.name || !material.customizeColorIndexes.length) continue;
+        const current = materialMap.get(material.name) ?? {
+            name: material.name,
+            customizeColorIndexes: new Set(),
+            paths: [],
+            defaultVariants: [],
+            source: "mod",
+        };
+        material.customizeColorIndexes.forEach(index => current.customizeColorIndexes.add(index));
+        current.paths.push(path);
+        const defaultVariant = {
+            path,
+            materialIndex: material.materialIndex,
+            customizeColors: material.customizeColors.map(color => ({
+                index: color.index,
+                linearRgba: color.linearRgba.slice(),
+                cmdRgba: color.cmdRgba.slice(),
+            })),
+        };
+        const signature = JSON.stringify(defaultVariant.customizeColors.map(color => [color.index, color.cmdRgba]));
+        if (!current.defaultVariants.some(variant => variant.signature === signature)) {
+            current.defaultVariants.push({ ...defaultVariant, signature });
         }
+        materialMap.set(material.name, current);
     }
 
     return [...materialMap.values()]
@@ -1661,8 +1647,9 @@ async function refreshDiscoveredCustomMaterials() {
         && state.cmdEntries.every((cmd, index) => cmd === cmdEntriesSnapshot[index])
     );
     const target = state.cmdEntries[0]?.metadata;
+    refreshMaterialDefaultTargets();
     const importedMaterials = discoverMdfColorMaterials(
-        state.importedMod?.entries,
+        materialDefaultEntries(),
         target,
     );
     let defaultMaterials = [];
@@ -1676,13 +1663,15 @@ async function refreshDiscoveredCustomMaterials() {
     }
     if (!refreshIsCurrent()) return null;
     state.customMdfMaterials = mergeMdfColorMaterials(importedMaterials, defaultMaterials);
+    const customCmdEntries = state.cmdEntries.filter(cmd => !isStandardDefaultPalette(cmd));
     for (const material of state.customMdfMaterials) {
         if (!refreshIsCurrent()) return null;
         const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
-        const presentEverywhere = state.cmdEntries.every(cmd => (
+        if (!customCmdEntries.length) continue;
+        const presentEverywhere = customCmdEntries.every(cmd => (
             cmd.colorClusters.some(cluster => cluster.name === material.name)
         ));
-        const completeEverywhere = state.cmdEntries.every(cmd => (
+        const completeEverywhere = customCmdEntries.every(cmd => (
             cmd.colorClusters.some(cluster => (
                 cluster.name === material.name
                 && cluster.colors.length >= requiredCount
@@ -1729,6 +1718,230 @@ function attachMdfFallbackColorsToCmdEntries() {
             }
         }
     }
+    attachMaterialDefaultEditMetadata();
+}
+
+function materialDefaultEntries() {
+    if (!state.importedMod) return {};
+    const entries = { ...state.importedMod.entries };
+    for (const [path, record] of state.materialDefaultBuffers) entries[path] = new Uint8Array(record.workingBuffer);
+    return entries;
+}
+
+function refreshMaterialDefaultTargets() {
+    const target = state.cmdEntries[0]?.metadata;
+    state.materialDefaultTargets = target && state.importedMod
+        ? discoverMaterialDefaultTargets(materialDefaultEntries(), {
+            selectedRoot: state.importedMod.selectedRoot,
+            esfId: target.esfId,
+            costumeFolder: target.costumeFolder,
+        }) : [];
+    for (const material of state.materialDefaultTargets) {
+        if (state.materialDefaultBuffers.has(material.sourcePath)) continue;
+        const bytes = state.importedMod.entries[material.sourcePath];
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        state.materialDefaultBuffers.set(material.sourcePath, {
+            originalBuffer: buffer,
+            workingBuffer: buffer.slice(0),
+            lastExportBuffer: buffer.slice(0),
+            originalMaterials: parseMdfMaterialNames(buffer, zipEntryBaseName(material.sourcePath)),
+        });
+    }
+}
+
+function originalMaterialDefaultColor(target, slotIndex) {
+    const record = state.materialDefaultBuffers.get(target.sourcePath);
+    return record.originalMaterials
+        .find(material => material.materialIndex === target.materialIndex)?.customizeColors
+        .find(color => color.index === slotIndex);
+}
+
+function attachMaterialDefaultEditMetadata() {
+    const partTypeForPath = path => {
+        const match = /esf\d{3}_\d{3}_(\d{2})(?:_|\.)/i.exec(zipEntryBaseName(path));
+        return ({ "00": 1, "01": 0, "02": 2 })[match?.[1]] ?? null;
+    };
+    const coveredParts = new Set(state.materialDefaultTargets.map(material => partTypeForPath(material.sourcePath)).filter(value => value !== null));
+    for (const cmd of state.cmdEntries) {
+        const partTypes = new Map();
+        for (const instance of cmd.instanceParse?.parsedInstances ?? []) {
+            if (instance.typeName !== "app.CostumeMaterialData.MaterialData") continue;
+            const type = instance.fields?.Type?.value;
+            for (const reference of instance.fields?.Clusters?.values ?? []) {
+                const types = partTypes.get(reference.instanceId) || [];
+                types.push(type);
+                partTypes.set(reference.instanceId, types);
+            }
+        }
+        for (const cluster of cmd.colorClusters) {
+        const types = partTypes.get(cluster.instanceId) || [];
+        cluster.materialPartTypes = types;
+        const materials = state.materialDefaultTargets.filter(material => material.name === cluster.name
+            && (partTypeForPath(material.sourcePath) === null || types.includes(partTypeForPath(material.sourcePath))));
+        const hasActualMaterials = types.some(type => coveredParts.has(type));
+        const ambiguous = materials.some(material => materials.some(other => (
+            other !== material && other.sourcePath === material.sourcePath
+        ))) || cmd.colorClusters.filter(other => other.name === cluster.name
+            && (partTypes.get(other.instanceId) || []).some(type => types.includes(type))).length > 1;
+        for (const slot of cmdColorSlots(cluster)) {
+            delete slot.materialEditBlockedReason;
+            delete slot.materialDefaultTargets;
+            delete slot.materialDefaultOriginalRgba;
+            slot.materialName = cluster.name;
+            const targets = materials.filter(material => material.customizeColors.some(color => color.index === slot.index));
+            const unsupported = targets.some(material => {
+                const colors = material.customizeColors.filter(color => color.index === slot.index);
+                return colors.length !== 1 || ![3, 4].includes(colors[0].componentCount);
+            });
+            const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+            const baselineEnabled = enabledAtOffset(baseline, slot.enable?.absoluteOffset, slot.enable?.byteLength);
+            const usesDefaultEdit = cmd.metadata.variant === "standard" && cmd.metadata.paletteNumber === 1 && baselineEnabled === false;
+            if (unsupported) {
+                slot.materialEditBlockedReason = "This material's color property is not a supported RGB or RGBA vector.";
+            } else if ((hasActualMaterials && !targets.length) || ambiguous) {
+                slot.materialEditBlockedReason = ambiguous
+                    ? "This material name matches multiple entries. Its color cannot be matched safely."
+                    : "This material or color slot is absent from the loaded mod materials. Load the complete mod ZIP to edit it.";
+            } else if (usesDefaultEdit && !targets.length) {
+                slot.materialEditBlockedReason = "This inactive Color 1 slot uses a material default. Load the complete mod ZIP, including its material files, to edit it safely.";
+            }
+            if (!targets.length || ambiguous || unsupported) continue;
+            if (slot.enabled === false) {
+                const color = targets[0].customizeColors.find(color => color.index === slot.index);
+                slot.mdfFallbackRgba = color.cmdRgba.slice();
+                slot.mdfFallbackLinearRgba = color.linearRgba.slice();
+                slot.mdfFallbackPath = targets[0].sourcePath;
+            }
+            if (usesDefaultEdit) {
+                slot.materialDefaultTargets = targets;
+                slot.materialDefaultOriginalRgba = originalMaterialDefaultColor(targets[0], slot.index)?.cmdRgba.slice();
+            }
+        }
+    }
+    }
+}
+
+function materialDefaultScopeText(materialName, slotIndex, targets = null) {
+    const scopedTargets = targets || state.materialDefaultTargets.filter(material => material.name === materialName
+        && material.customizeColorIndexes.includes(slotIndex));
+    const paths = new Set(scopedTargets.map(target => target.sourcePath));
+    const palettes = state.cmdEntries.filter(cmd => cmd.colorClusters.some(cluster => (
+        cluster.name === materialName && cluster.colors.some(slot => slot.index === slotIndex && !isSlotEnabled(slot)
+            && (slot.materialDefaultTargets?.some(target => paths.has(target.sourcePath)) || paths.has(slot.mdfFallbackPath)))
+    ))).map(cmd => cmdDisplayName(cmd));
+    const roots = new Set(scopedTargets.map(material => material.root));
+    const modRoot = zipEntryDirectory(state.importedMod?.modinfoPath);
+    const exportHint = [...roots].some(root => root.toLowerCase() !== modRoot.toLowerCase())
+        ? "Build the full mod ZIP to preserve the material variants."
+        : "Save a mod ZIP to include the material file.";
+    return `Shared default: ${palettes.join(", ") || "inactive palettes"}; ${roots.size} mod component${roots.size === 1 ? "" : "s"}. ${exportHint}`;
+}
+
+function planColorSlotEdit(cmd, slot, rgba, { forceEnable = true } = {}) {
+    if (slot?.materialEditBlockedReason) throw new Error(slot.materialEditBlockedReason);
+    if (!isSlotEditable(slot)) throw new Error("This color slot cannot be edited.");
+    if (slot.materialDefaultTargets?.length) {
+        if (rgba[3] !== 255 && slot.materialDefaultTargets.some(target => (
+            target.customizeColors.find(color => color.index === slot.index).componentCount === 3
+        ))) throw new Error("This material default stores RGB only; its alpha must remain 255.");
+        const patches = new Map();
+        for (const target of slot.materialDefaultTargets) {
+            const record = state.materialDefaultBuffers.get(target.sourcePath);
+            const source = patches.get(target.sourcePath) || record.workingBuffer;
+            const current = target.customizeColors.find(color => color.index === slot.index);
+            if (rgbaEquals(current.cmdRgba, rgba)) continue;
+            patches.set(target.sourcePath, writeMaterialDefaultColor(
+                source, zipEntryBaseName(target.sourcePath), target.name, slot.index, rgba,
+                { materialIndex: target.materialIndex },
+            ).buffer);
+        }
+        return { kind: "default", patches, cmd, slot, rgba };
+    }
+    return { kind: "cmd", cmd, slot, rgba, forceEnable };
+}
+
+function applyColorSlotEdit(plan) {
+    const { cmd, slot, rgba } = plan;
+    if (plan.kind === "default") {
+        for (const target of slot.materialDefaultTargets) {
+            const current = state.materialDefaultTargets.find(material => (
+                material.sourcePath === target.sourcePath && material.materialIndex === target.materialIndex
+            ))?.customizeColors.find(color => color.index === slot.index);
+            if (rgbaEquals(current?.cmdRgba, rgba)) continue;
+            const record = state.materialDefaultBuffers.get(target.sourcePath);
+            record.workingBuffer = writeMaterialDefaultColor(record.workingBuffer,
+                zipEntryBaseName(target.sourcePath), target.name, slot.index, rgba,
+                { materialIndex: target.materialIndex }).buffer;
+        }
+        refreshMaterialDefaultTargets();
+        attachMaterialDefaultEditMetadata();
+    } else {
+        writeRgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset, rgba);
+        updateColorModelAtOffset(cmd, slot.color.absoluteOffset, rgba);
+        if (plan.forceEnable) forceEnableSlot(cmd, slot);
+    }
+}
+
+function hasMaterialDefaultEdits({ sinceExport = false } = {}) {
+    return [...state.materialDefaultBuffers.values()].some(record => (
+        diffBuffers(sinceExport ? record.lastExportBuffer : record.originalBuffer, record.workingBuffer).length > 0
+    ));
+}
+
+function getMaterialDefaultChanges() {
+    const groups = new Map();
+    for (const target of state.materialDefaultTargets) for (const color of target.customizeColors) {
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const before = new Uint8Array(record.originalBuffer, color.dataOffset, color.componentCount * 4);
+        const after = new Uint8Array(record.workingBuffer, color.dataOffset, color.componentCount * 4);
+        if (before.every((value, index) => value === after[index])) continue;
+        const original = originalMaterialDefaultColor(target, color.index);
+        let editCmd = null;
+        let colorRef = null;
+        for (const cmd of state.cmdEntries) for (const cluster of cmd.colorClusters) {
+            if (cluster.name !== target.name) continue;
+            const slot = cluster.colors.find(slot => slot.index === color.index && slot.materialDefaultTargets?.some(candidate => (
+                candidate.sourcePath === target.sourcePath && candidate.materialIndex === target.materialIndex
+            )));
+            if (slot && !colorRef) { colorRef = slot; editCmd = cmd; }
+        }
+        const editTargets = colorRef?.materialDefaultTargets || [target];
+        const scope = editTargets.map(target => [target.sourcePath, target.materialIndex]).sort();
+        const key = JSON.stringify([target.name, color.index, scope]);
+        const group = groups.get(key) || {
+            kind: "default", cluster: target.name, slot: `CustomizeColor_${color.index}`, slotIndex: color.index,
+            beforeRgba: original.cmdRgba, afterRgba: color.cmdRgba,
+            before: rgbaToHexString(original.cmdRgba), after: rgbaToHexString(color.cmdRgba), targets: [],
+            editTargets, colorRef, cmd: editCmd,
+        };
+        group.targets.push(target);
+        groups.set(key, group);
+    }
+    return [...groups.values()];
+}
+
+function revertMaterialDefaultChange(change) {
+    for (const target of change.targets) {
+        const color = target.customizeColors.find(color => color.index === change.slotIndex);
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        new Uint8Array(record.workingBuffer).set(
+            new Uint8Array(record.originalBuffer, color.dataOffset, color.componentCount * 4), color.dataOffset,
+        );
+    }
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
+    state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(hasPendingColorEdits);
+    updateInspectorDirtyUi();
+    renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+}
+
+function revertMaterialDefaults() {
+    for (const record of state.materialDefaultBuffers.values()) record.workingBuffer = record.originalBuffer.slice(0);
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
 }
 
 function resetLoadedCmdState() {
@@ -1746,6 +1959,8 @@ function resetLoadedCmdState() {
     state.detectedCostume = null;
     state.customMdfMaterials = [];
     state.customMaterialMappings = [];
+    state.materialDefaultTargets = [];
+    state.materialDefaultBuffers.clear();
     resetDuplicateScope();
     state.paletteDuplicate.undo = null;
     hideStatus(colorStateStatus);
@@ -2401,14 +2616,7 @@ function setCmdColorSlot(cmdEntry, materialName, slotIndex, cmdRgba, { forceEnab
     const slot = getColorSlot(cmdEntry, materialName, slotIndex);
     if (!isSlotEditable(slot)) return false;
 
-    writeRgbaAtOffset(
-        cmdEntry.workingBuffer,
-        slot.color.absoluteOffset,
-        cmdRgba,
-    );
-    updateColorModelAtOffset(cmdEntry, slot.color.absoluteOffset, cmdRgba);
-
-    if (forceEnable) forceEnableSlot(cmdEntry, slot);
+    applyColorSlotEdit(planColorSlotEdit(cmdEntry, slot, cmdRgba, { forceEnable }));
     return true;
 }
 
@@ -2416,9 +2624,7 @@ function applyColorEdit(color, rgba) {
     const cmd = state.cmdEntries[state.activeCmdIndex];
     if (!cmd || !isSlotEditable(color)) return;
 
-    writeRgbaAtOffset(cmd.workingBuffer, color.color.absoluteOffset, rgba);
-    updateColorModelAtOffset(cmd, color.color.absoluteOffset, rgba);
-    forceEnableSlot(cmd, color);
+    applyColorSlotEdit(planColorSlotEdit(cmd, color, rgba));
 
     state.inspectorDirty = true;
     updateInspectorDirtyUi();
@@ -2430,13 +2636,7 @@ function applyColorEdit(color, rgba) {
 function setCmdColorParameter(cmd, materialName, parameter, rgba) {
     const address = normalizeCmdColorParameter(parameter);
     if (!address) return false;
-    if (address.kind === "customize") return setCmdColorSlot(cmd, materialName, address.index, rgba, { forceEnable: true });
-    const slot = getMaterial(cmd, materialName)?.shaderColors?.find(color => color.runtimeName === address.parameter);
-    if (!isSlotEditable(slot)) return false;
-    writeRgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset, rgba);
-    updateColorModelAtOffset(cmd, slot.color.absoluteOffset, rgba);
-    forceEnableSlot(cmd, slot);
-    return true;
+    return setCmdColorSlot(cmd, materialName, address.index, rgba, { forceEnable: true });
 }
 
 
@@ -2605,6 +2805,11 @@ function applyColorSync() {
     const rgba = slotRgba(source);
     const results = [];
 
+    targetSlotIndexes.forEach(index => {
+        const slot = getColorSlot(cmd, targetMaterial, index);
+        if (slot) planColorSlotEdit(cmd, slot, rgba);
+    });
+
     for (const slotIndex of targetSlotIndexes) {
         const changed = setCmdColorSlot(
             cmd,
@@ -2651,6 +2856,16 @@ function applyPatternSync() {
     const results = [];
     let applied = 0;
     let skippedDisabled = 0;
+
+    for (const index of targetCmdIndexes) {
+        const cmd = state.cmdEntries[index];
+        const source = getColorSlot(cmd, sourceMaterial, sourceSlotIndex);
+        if (!isSlotEditable(source) || !isSlotEnabled(source)) continue;
+        for (const slotIndex of targetSlotIndexes) {
+            const slot = getColorSlot(cmd, targetMaterial, slotIndex);
+            if (slot) planColorSlotEdit(cmd, slot, slotRgba(source));
+        }
+    }
 
     for (const cmdIndex of targetCmdIndexes) {
         const cmd = state.cmdEntries[cmdIndex];
@@ -2800,6 +3015,12 @@ function applyPaletteDuplicate() {
     if (!operationCount) {
         throw new Error("No matching editable color slots were found in the selected targets.");
     }
+    for (const { cmd, plan } of targetPlans) for (const operation of plan.operations) {
+        if (operation.targetSlot.materialDefaultTargets?.length) {
+            throw new Error("Duplicate Palette cannot replace shared material defaults. Edit these slots directly, or use Color Sync, then save a mod ZIP.");
+        }
+        planColorSlotEdit(cmd, operation.targetSlot, operation.rgba, { forceEnable: false });
+    }
 
     const missingMaterials = targetPlans.reduce((total, entry) => total + entry.plan.missingMaterials, 0);
     const missingSlots = targetPlans.reduce((total, entry) => total + entry.plan.missingSlots, 0);
@@ -2921,7 +3142,7 @@ function undoLastPaletteDuplicate() {
     }
 
     state.paletteDuplicate.undo = null;
-    state.inspectorDirty = state.cmdEntries.some(cmd => (
+    state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(cmd => (
         diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
     ));
     updateInspectorDirtyUi();
@@ -2984,6 +3205,8 @@ function getCurrentColorChanges() {
         }
     });
 
+    const materialChanges = getMaterialDefaultChanges();
+    if (materialChanges.length) result.push({ label: "Shared material defaults", changes: materialChanges });
     return result;
 }
 
@@ -3002,6 +3225,9 @@ function revertChange(cmdIndex, offset) {
         slot.enable.value = enabled;
     }
     removeSurpriseSnapshotSlot(cmd, offset);
+    attachMaterialDefaultEditMetadata();
+    state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(hasPendingColorEdits);
+    updateInspectorDirtyUi();
 
     renderColorClusters(state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? []);
     renderCurrentChanges();
@@ -3114,14 +3340,10 @@ function applyReplaceEverywhere({ newRgbaOverride = null } = {}) {
         };
     }
 
+    const plans = matches.map(match => planColorSlotEdit(state.cmdEntries[match.cmdIndex], match.colorRef, newRgba));
     let changed = 0;
-    for (const match of matches) {
-        const cmd = state.cmdEntries[match.cmdIndex];
-        if (!cmd) continue;
-
-        writeRgbaAtOffset(cmd.workingBuffer, match.offset, newRgba);
-        updateColorModelAtOffset(cmd, match.offset, newRgba);
-        forceEnableSlot(cmd, match.colorRef);
+    for (const plan of plans) {
+        applyColorSlotEdit(plan);
         changed += 1;
     }
 
@@ -3269,6 +3491,7 @@ function bindReplaceColorUi() {
 }
 
 function revertAllChanges() {
+    revertMaterialDefaults();
     for (const cmd of state.cmdEntries) {
         const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
         const working = new Uint8Array(cmd.workingBuffer);
@@ -3342,6 +3565,13 @@ function renderCurrentChanges() {
                 activeState.textContent = `Active: ${change.beforeEnabled ? "Yes" : "No"} → ${change.afterEnabled ? "Yes" : "No"}`;
                 meta.appendChild(activeState);
             }
+            if (change.kind === "default") {
+                row.dataset.materialDefault = "true";
+                const scope = document.createElement("div");
+                scope.className = "material-default-scope";
+                scope.textContent = materialDefaultScopeText(change.cluster, change.slotIndex, change.editTargets);
+                meta.appendChild(scope);
+            }
 
             const afterBtn = document.createElement("button");
             afterBtn.type = "button";
@@ -3350,11 +3580,20 @@ function renderCurrentChanges() {
             afterBtn.title = "Edit color";
             afterBtn.addEventListener("click", () => {
                 openCustomColorPicker(afterBtn, change.afterRgba, rgba => {
+                    if (change.kind === "default") {
+                        const cmd = change.cmd;
+                        const slot = change.colorRef;
+                        if (!slot) return;
+                        applyColorSlotEdit(planColorSlotEdit(cmd, slot, rgba));
+                        change.afterRgba = rgba;
+                        change.after = rgbaToHexString(rgba);
+                        afterBtn.style.background = change.after;
+                        updateExportButtons();
+                        return;
+                    }
                     const cmd = state.cmdEntries[change.cmdIndex];
                     if (!cmd) return;
-                    writeRgbaAtOffset(cmd.workingBuffer, change.offset, rgba);
-                    updateColorModelAtOffset(cmd, change.offset, rgba);
-                    forceEnableSlot(cmd, change.colorRef);
+                    applyColorSlotEdit(planColorSlotEdit(cmd, change.colorRef, rgba));
                     change.afterRgba = rgba;
                     change.after = rgbaToHexString(rgba);
                     afterBtn.style.background = change.after;
@@ -3379,7 +3618,8 @@ function renderCurrentChanges() {
             revertBtn.className = "secondary-button small-button";
             revertBtn.textContent = "Revert";
             revertBtn.addEventListener("click", () => {
-                revertChange(change.cmdIndex, change.offset);
+                if (change.kind === "default") revertMaterialDefaultChange(change);
+                else revertChange(change.cmdIndex, change.offset);
             });
 
             row.append(meta, afterBtn, revertBtn);
@@ -3397,12 +3637,12 @@ function renderCurrentChanges() {
 // ============================================================
 
 const COLOR_STATE_FORMAT = "sf6-cmd-color-state";
-const COLOR_STATE_VERSION = 1;
+const COLOR_STATE_VERSION = 2;
 const MAX_COLOR_STATE_BYTES = 16 * 1024 * 1024;
 
 function editableColorStateSlots(cmd) {
     return cmd.colorClusters.flatMap((cluster, clusterIndex) => cmdColorSlots(cluster)
-        .filter(isSlotEditable)
+        .filter(slot => slot && !slot.error && slot.color && Number.isInteger(slot.color.absoluteOffset))
         .map(slot => ({ cluster, clusterIndex, slot })));
 }
 
@@ -3419,6 +3659,15 @@ function buildColorStateDocument() {
             costume: state.detectedCostume,
             archiveName: state.importedMod?.sourceName ?? null,
         },
+        materialDefaults: getMaterialDefaultChanges().map(change => ({
+            material: change.cluster,
+            slotIndex: change.slotIndex,
+            rgba: change.afterRgba.slice(),
+            targets: change.editTargets.map(target => ({
+                sourcePath: target.sourcePath, materialIndex: target.materialIndex,
+                originalLinearRgba: originalMaterialDefaultColor(target, change.slotIndex).linearRgba.slice(),
+            })),
+        })),
         commands: state.cmdEntries.map(cmd => ({
             identity: cmdIdentityKey(cmd.metadata),
             filename: cmd.file.name,
@@ -3468,7 +3717,7 @@ function validateColorStateDocument(document) {
     if (!document || typeof document !== "object" || Array.isArray(document)) {
         throw new Error("This is not a valid SF6 Color Sync state file.");
     }
-    if (document.format !== COLOR_STATE_FORMAT || document.version !== COLOR_STATE_VERSION) {
+    if (document.format !== COLOR_STATE_FORMAT || ![1, COLOR_STATE_VERSION].includes(document.version)) {
         throw new Error("This color state uses an unsupported format or version.");
     }
     if (!Array.isArray(document.commands) || !document.commands.length) {
@@ -3502,8 +3751,7 @@ function validateColorStateDocument(document) {
             throw new Error(`Color data is missing for ${savedCmd.filename || identity}.`);
         }
 
-        const legacySlots = savedCmd.slots.every(slot => Number.isInteger(slot?.slotIndex));
-        const expectedSlots = editableColorStateSlots(cmd).filter(({ slot }) => !legacySlots || slot.kind !== "hair");
+        const expectedSlots = editableColorStateSlots(cmd);
         if (savedCmd.slots.length !== expectedSlots.length) {
             throw new Error(
                 `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
@@ -3512,18 +3760,15 @@ function validateColorStateDocument(document) {
 
         const seenTargets = new Set();
         for (const savedSlot of savedCmd.slots) {
-            const { clusterIndex, material, slotIndex, runtimeName, rgba, enabled } = savedSlot || {};
-            const address = normalizeCmdColorParameter(slotIndex === null ? runtimeName : `CustomizeColor_${slotIndex}`);
-            if (!Number.isInteger(clusterIndex) || clusterIndex < 0 || !address
-                || (slotIndex === null ? address.kind !== "hair" : !Number.isInteger(slotIndex))) {
+            const { clusterIndex, material, slotIndex, rgba, enabled } = savedSlot || {};
+            const address = normalizeCmdColorParameter(`CustomizeColor_${slotIndex}`);
+            if (!Number.isInteger(clusterIndex) || clusterIndex < 0 || !Number.isInteger(slotIndex) || !address) {
                 throw new Error(`The color state has an invalid slot address in ${savedCmd.filename || identity}.`);
             }
             const cluster = cmd.colorClusters[clusterIndex];
-            const slot = address.kind === "hair"
-                ? cluster?.shaderColors?.find(candidate => candidate.runtimeName === address.parameter)
-                : cluster?.colors.find(candidate => candidate.index === slotIndex);
+            const slot = cluster?.colors.find(candidate => candidate.index === slotIndex);
             const targetKey = `${clusterIndex}|${address.parameter}`;
-            if (!cluster || cluster.name !== material || !isSlotEditable(slot) || seenTargets.has(targetKey)) {
+            if (!cluster || cluster.name !== material || !slot || slot.error || !slot.color || seenTargets.has(targetKey)) {
                 throw new Error(
                     `${savedCmd.filename || identity} has a different editable material/slot structure than the loaded CMD.`,
                 );
@@ -3539,6 +3784,14 @@ function validateColorStateDocument(document) {
                 throw new Error(`The loaded CMD cannot restore an active state recorded in ${savedCmd.filename || identity}.`);
             }
             seenTargets.add(targetKey);
+            const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+            const baselineRgba = rgbaAtOffset(baseline, slot.color.absoluteOffset);
+            const baselineEnabled = enabledAtOffset(baseline, slot.enable?.absoluteOffset, slot.enable?.byteLength);
+            const changesBaseline = !rgbaEquals(baselineRgba, rgba) || baselineEnabled !== enabled;
+            if (changesBaseline && slot.materialEditBlockedReason) throw new Error(slot.materialEditBlockedReason);
+            if (changesBaseline && slot.materialDefaultTargets?.length) {
+                throw new Error("This saved state enables or overwrites a slot that now uses a shared material default. Edit that default directly and save a new state.");
+            }
             operations.push({ cmd, slot, rgba: rgba.slice(), enabled });
         }
     }
@@ -3547,6 +3800,7 @@ function validateColorStateDocument(document) {
 
 function applyColorStateDocument(document) {
     const operations = validateColorStateDocument(document);
+    const defaultPlans = validateMaterialDefaultState(document);
     let changedSlots = 0;
 
     for (const { cmd, slot, rgba, enabled } of operations) {
@@ -3572,8 +3826,14 @@ function applyColorStateDocument(document) {
         }
     }
 
+    revertMaterialDefaults();
+    for (const plan of defaultPlans) {
+        applyColorSlotEdit(planColorSlotEdit(plan.cmd, plan.slot, plan.rgba));
+        changedSlots += 1;
+    }
+
     state.surpriseSnapshots.clear();
-    state.inspectorDirty = state.cmdEntries.some(cmd => (
+    state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(cmd => (
         diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
     ));
     updateInspectorDirtyUi();
@@ -3582,6 +3842,47 @@ function applyColorStateDocument(document) {
     renderSyncPanels();
     updateExportButtons();
     return { commandCount: document.commands.length, slotCount: operations.length, changedSlots };
+}
+
+function validateMaterialDefaultState(document) {
+    if (document.version === 1) return [];
+    if (!Array.isArray(document.materialDefaults)) throw new Error("The color state is missing its material defaults.");
+    const seen = new Set();
+    return document.materialDefaults.map(saved => {
+        if (typeof saved?.material !== "string" || !Number.isInteger(saved.slotIndex) || saved.slotIndex < 0
+            || !Array.isArray(saved.rgba) || saved.rgba.length !== 4
+            || saved.rgba.some(value => !Number.isInteger(value) || value < 0 || value > 255)
+            || !Array.isArray(saved.targets) || !saved.targets.length) {
+            throw new Error("The color state contains an invalid material default.");
+        }
+        const key = JSON.stringify([saved.material, saved.slotIndex, saved.targets.map(target => [target.sourcePath, target.materialIndex]).sort()]);
+        if (seen.has(key)) throw new Error("The color state contains a duplicate material default.");
+        seen.add(key);
+        const targets = [];
+        const seenPaths = new Set();
+        for (const savedTarget of saved.targets) {
+            const target = state.materialDefaultTargets.find(target => (
+                target.name === saved.material && target.customizeColorIndexes.includes(saved.slotIndex)
+                && target.sourcePath === savedTarget?.sourcePath && target.materialIndex === savedTarget?.materialIndex
+            ));
+            const identity = JSON.stringify([savedTarget?.sourcePath, savedTarget?.materialIndex]);
+            if (!target || seenPaths.has(identity)) throw new Error("The loaded material files do not match this color state.");
+            seenPaths.add(identity);
+            const original = originalMaterialDefaultColor(target, saved.slotIndex);
+            if (JSON.stringify(original.linearRgba) !== JSON.stringify(savedTarget.originalLinearRgba)) {
+                throw new Error("The original material colors differ from this saved state. Load the ZIP used when it was saved.");
+            }
+            const propertyKey = JSON.stringify([target.sourcePath, target.materialIndex, saved.slotIndex]);
+            if (seen.has(propertyKey)) throw new Error("The color state contains overlapping material defaults.");
+            seen.add(propertyKey);
+            targets.push(target);
+        }
+        const cmd = state.cmdEntries[0];
+        const slot = { index: saved.slotIndex, materialName: saved.material,
+            materialDefaultTargets: targets, color: { absoluteOffset: 0 } };
+        planColorSlotEdit(cmd, slot, saved.rgba);
+        return { cmd, slot, rgba: saved.rgba.slice() };
+    });
 }
 
 async function loadColorStateFile(file) {
@@ -3713,6 +4014,12 @@ function applyFreecamColors() {
     const plan = planFreecamColorImport(pending.documentData, cmd);
     const operations = plan.operations.filter(operation => operation.changed);
     if (!operations.length) throw new Error("No matching colors need to change.");
+    for (const operation of operations) {
+        if (operation.slot.materialDefaultTargets?.length) {
+            throw new Error("Freecam import cannot enable a shared material default. Edit these slots directly, or use Color Sync, then save a mod ZIP.");
+        }
+        planColorSlotEdit(cmd, operation.slot, operation.rgba);
+    }
     const beforeBuffer = cmd.workingBuffer.slice(0);
     for (const operation of operations) {
         setCmdColorParameter(cmd, operation.material, operation.parameter, operation.rgba);
@@ -3843,14 +4150,28 @@ function buildExportChangelog(changedCmds) {
         }
         lines.push("");
     }
+    for (const target of state.materialDefaultTargets) {
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const baseline = parseMdfMaterialNames(record.lastExportBuffer, zipEntryBaseName(target.sourcePath))
+            .find(material => material.materialIndex === target.materialIndex);
+        for (const color of target.customizeColors) {
+            const before = baseline.customizeColors.find(previous => previous.index === color.index);
+            if (rgbaEquals(before.cmdRgba, color.cmdRgba)) continue;
+            lines.push(`Shared material default: ${target.sourcePath}`,
+                `- ${target.name} · CustomizeColor_${color.index}: ${rgbaToHexString(before.cmdRgba)} → ${rgbaToHexString(color.cmdRgba)}`, "");
+        }
+    }
     return new TextEncoder().encode(`${lines.join("\n")}\n`);
 }
 
 function updateExportButtons() {
-    const hasChanges = state.cmdEntries.some(cmd => diffBuffers(exportBaseline(cmd), cmd.workingBuffer).length > 0);
+    const hasChanges = hasMaterialDefaultEdits({ sinceExport: true }) || state.cmdEntries.some(cmd => diffBuffers(exportBaseline(cmd), cmd.workingBuffer).length > 0);
     const hasCmds = state.cmdEntries.length > 0;
     if (buildButton) buildButton.disabled = !hasChanges;
-    if (exportCmdButton) exportCmdButton.disabled = !hasChanges;
+    if (exportCmdButton) {
+        exportCmdButton.disabled = !hasChanges || hasMaterialDefaultEdits();
+        exportCmdButton.title = hasMaterialDefaultEdits() ? "Shared material defaults need a mod ZIP, which includes the material files." : "Export modified CMD files";
+    }
     if (exportColorsZipButton) exportColorsZipButton.disabled = !state.importedMod || state.cmdEntries.length === 0;
     if (saveColorStateBtn) saveColorStateBtn.disabled = !hasCmds;
     if (loadColorStateBtn) loadColorStateBtn.disabled = !hasCmds;
@@ -3864,6 +4185,7 @@ function updateZipFileNameField() {
 }
 
 async function exportModifiedCmdFiles() {
+    if (hasMaterialDefaultEdits()) throw new Error("These edits include shared material defaults. Export a mod ZIP to keep the material files with your colors.");
     const exported = [];
 
     for (const cmd of state.cmdEntries) {
@@ -3892,12 +4214,19 @@ async function exportModifiedCmdFiles() {
 }
 
 async function buildModZip({ colorsOnly = false } = {}) {
+    const importedModSnapshot = state.importedMod;
     if (colorsOnly && !state.importedMod) {
         throw new Error("Load a mod ZIP before exporting a colors-only ZIP.");
     }
     const includeColorBackups = includeColorBackupsInput?.checked !== false;
     const modinfoPath = state.importedMod?.modinfoPath || "modinfo.ini";
     const modRoot = zipEntryDirectory(modinfoPath);
+    const requiredMaterialPaths = new Set([...state.materialDefaultBuffers.entries()]
+        .filter(([, record]) => diffBuffers(record.originalBuffer, record.workingBuffer).length > 0)
+        .map(([path]) => path));
+    if (colorsOnly && [...requiredMaterialPaths].some(path => !path.toLowerCase().startsWith(modRoot.toLowerCase()))) {
+        throw new Error("These shared defaults belong to separate mod variants. Build the full mod ZIP to preserve their meshes, textures, and component dependencies.");
+    }
     const files = colorsOnly
         ? Object.fromEntries(Object.entries(state.importedMod.entries).filter(([path]) => (
             isColorBackupPath(path)
@@ -3921,6 +4250,17 @@ async function buildModZip({ colorsOnly = false } = {}) {
     const exported = [];
     const includedCmds = [];
     const changedCmds = [];
+    const materialPaths = colorsOnly ? requiredMaterialPaths : new Set(state.materialDefaultTargets.map(target => target.sourcePath));
+    const changedMaterialSources = [...state.materialDefaultBuffers.entries()].filter(([, record]) => (
+        diffBuffers(record.lastExportBuffer, record.workingBuffer).length > 0
+    ));
+    const materialRoots = new Set(state.materialDefaultTargets.filter(target => requiredMaterialPaths.has(target.sourcePath)).map(target => target.root));
+    const includesSharedComponents = materialRoots.size > 1 || [...materialRoots].some(root => root !== modRoot);
+    for (const [path, record] of state.materialDefaultBuffers) {
+        if ((colorsOnly && requiredMaterialPaths.has(path)) || (!colorsOnly && diffBuffers(record.lastExportBuffer, record.workingBuffer).length > 0)) {
+            files[path] = new Uint8Array(record.workingBuffer.slice(0));
+        }
+    }
 
     for (const cmd of state.cmdEntries) {
         if (colorsOnly && isReferenceCmdMetadata(cmd.metadata)) continue;
@@ -3941,7 +4281,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
                 + cmd.file.name);
 
         if (colorsOnly || changed) {
-            paths.forEach(path => { files[path] = new Uint8Array(cmd.workingBuffer); });
+            paths.forEach(path => { files[path] = new Uint8Array(cmd.workingBuffer.slice(0)); });
             includedCmds.push({ cmd, paths });
             exported.push({
                 file: cmd.file.name,
@@ -3951,12 +4291,17 @@ async function buildModZip({ colorsOnly = false } = {}) {
         if (changed) changedCmds.push({ cmd, paths, baseline, changes: semanticChanges });
     }
 
+    for (const [path, record] of changedMaterialSources) exported.push({
+        file: zipEntryBaseName(path), changedBytes: diffBuffers(record.lastExportBuffer, record.workingBuffer).length,
+    });
     if (exported.length === 0) {
         throw new Error(colorsOnly ? "No CMD colors are loaded." : "Nothing changed.");
     }
 
     const requestedName = modNameInput?.value?.trim() || "SF6 Colors";
-    const name = colorsOnly ? withOnlyColorsSuffix(requestedName) : requestedName;
+    const name = includesSharedComponents
+        ? (parseModinfoValue(state.importedMod?.modinfoText, "name") || requestedName)
+        : colorsOnly ? withOnlyColorsSuffix(requestedName) : requestedName;
     const description =
         modDescriptionInput?.value?.trim() || "Created with SF6 Color Sync";
     const author = modAuthorInput?.value?.trim() || "ZZtai";
@@ -3979,6 +4324,10 @@ async function buildModZip({ colorsOnly = false } = {}) {
         const historySources = changedCmds.flatMap(({ paths, baseline }) => paths
             .filter(path => state.importedMod?.hadLiveCmd?.[path])
             .map(path => ({ path, buffer: baseline })));
+        for (const path of materialPaths) originalSources.push({ path, buffer: state.materialDefaultBuffers.get(path).originalBuffer });
+        for (const [path, record] of changedMaterialSources) {
+            if (!colorsOnly || materialPaths.has(path)) historySources.push({ path, buffer: record.lastExportBuffer });
+        }
         writeColorBackupSnapshots({
             files,
             modRoot,
@@ -4028,12 +4377,17 @@ async function buildModZip({ colorsOnly = false } = {}) {
         },
     );
     if (destination.mode === "cancelled") throw new Error("ZIP export cancelled.");
-    if (state.importedMod && !colorsOnly) {
+    if (state.importedMod && state.importedMod === importedModSnapshot && !colorsOnly) {
         state.importedMod.entries = files;
         state.importedMod.colorBackupManifest = readColorBackupManifest(files, modRoot);
         for (const { cmd, paths } of changedCmds) {
-            state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = cmd.workingBuffer.slice(0);
+            const bytes = files[paths[0]];
+            state.importedMod.lastZipExportBuffers[cmdIdentityKey(cmd.metadata)] = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
             paths.forEach(path => { state.importedMod.hadLiveCmd[path] = true; });
+        }
+        for (const [path, record] of state.materialDefaultBuffers) {
+            const bytes = files[path];
+            if (bytes) record.lastExportBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
         }
         renderColorBackupPanel();
     }
@@ -4738,6 +5092,10 @@ function snapshotFilesForLoadedCmds(snapshot) {
     const byIdentity = new Map(state.cmdEntries.map(cmd => [cmdIdentityKey(cmd.metadata), cmd]));
     const matched = new Map();
     for (const file of snapshot.files) {
+        if (state.materialDefaultBuffers.has(file.livePath)) {
+            matched.set(`material:${file.livePath}`, { ...file, materialPath: file.livePath });
+            continue;
+        }
         const metadata = parseCmdFilename(zipEntryBaseName(file.livePath));
         const identity = cmdIdentityKey(metadata);
         const cmd = metadata ? byIdentity.get(identity) : null;
@@ -4771,8 +5129,8 @@ function renderColorBackupPanel() {
         title.textContent = colorBackupDateLabel(snapshot);
         const description = document.createElement("span");
         description.textContent = snapshot.kind === "original"
-            ? `First color set preserved by Color Sync · ${targets.length} loaded CMD file${targets.length === 1 ? "" : "s"}`
-            : `Colors immediately before this export · ${targets.length} CMD${targets.length === 1 ? "" : "s"} backed up`;
+            ? `First color set preserved by Color Sync · ${targets.length} color file${targets.length === 1 ? "" : "s"}`
+            : `Colors immediately before this export · ${targets.length} CMD or material file${targets.length === 1 ? "" : "s"} backed up`;
         copy.append(title, description);
 
         const changelogPath = safeArchiveRelativePath(snapshot.changelogPath);
@@ -4802,7 +5160,8 @@ function renderColorBackupPanel() {
 
 function customMaterialTemplateNames(material) {
     const requiredIndex = Math.max(...material.customizeColorIndexes, -1);
-    const firstCmd = state.cmdEntries[0];
+    const customCmdEntries = state.cmdEntries.filter(cmd => !isStandardDefaultPalette(cmd));
+    const firstCmd = customCmdEntries[0];
     if (!firstCmd) return [];
     const names = [];
     const seen = new Set();
@@ -4822,7 +5181,7 @@ function customMaterialTemplateNames(material) {
             || seen.has(cluster.name)
             || cluster.colors.length <= requiredIndex
         ) continue;
-        const availableEverywhere = state.cmdEntries.every(cmd => (
+        const availableEverywhere = customCmdEntries.every(cmd => (
             cmd.colorClusters.some(candidate => (
                 candidate.name === cluster.name
                 && candidate.colors.length > requiredIndex
@@ -4939,7 +5298,14 @@ function hasPendingColorEdits(cmd) {
     return diffBuffers(baseline, cmd.workingBuffer).length > 0;
 }
 
+function isStandardDefaultPalette(cmd) {
+    return cmd?.metadata?.variant === "standard" && cmd.metadata.paletteNumber === 1;
+}
+
 function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappings) {
+    // Color 1 retains the supplied graph; missing custom materials use their
+    // MDF defaults instead of creating a new CMD override cluster.
+    if (isStandardDefaultPalette(cmd)) return cmd;
     if (!mappings.length) return cmd;
     const startingBuffer = cmd.workingBuffer;
     let buffer = startingBuffer;
@@ -5013,6 +5379,7 @@ async function addDiscoveredCustomMaterial(materialName, templateName, sourceMap
     };
     const rebuiltEntries = [];
     for (const cmd of state.cmdEntries) {
+        if (isStandardDefaultPalette(cmd)) continue;
         const current = inspectCmdBuffer(cmd.workingBuffer);
         const sourceSlots = customMaterialInitialSlots(nextMapping, cmd);
         const colorCount = sourceSlots?.length || Math.max(...material.customizeColorIndexes, -1) + 1;
@@ -5085,7 +5452,7 @@ async function restoreColorBackup(snapshotId) {
 
     const label = colorBackupDateLabel(snapshot);
     const accepted = window.confirm(
-        `Restore “${label}” across ${targets.length} CMD file${targets.length === 1 ? "" : "s"}?\n\n`
+        `Restore “${label}” across ${targets.length} color file${targets.length === 1 ? "" : "s"}?\n\n`
         + "This replaces current color changes in those files.",
     );
     if (!accepted) return false;
@@ -5098,14 +5465,47 @@ async function restoreColorBackup(snapshotId) {
         const backupPath = safeArchiveRelativePath(target.backupPath);
         const bytes = state.importedMod.entries[backupPath];
         if (!bytes) throw new Error(`Backup file is missing: ${target.backupPath}`);
+        if (target.materialPath) {
+            const materialBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            const parsed = parseMdfMaterialNames(materialBuffer, zipEntryBaseName(target.materialPath));
+            const current = state.materialDefaultTargets.filter(material => material.sourcePath === target.materialPath);
+            if (current.some(material => !parsed.some(restored => restored.name === material.name
+                && restored.materialIndex === material.materialIndex
+                && JSON.stringify(restored.customizeColorIndexes) === JSON.stringify(material.customizeColorIndexes)))) {
+                throw new Error(`Backup material structure differs: ${target.materialPath}`);
+            }
+            return { target, materialBuffer };
+        }
         const restored = applyCustomMappingsToCmdEntry(await parseCmdEntry({
             file: new File([bytes], target.cmd.file.name, { type: "application/octet-stream" }),
             metadata: target.cmd.metadata,
         }), restoreMappings);
+        for (const cluster of target.cmd.colorClusters) for (const slot of cmdColorSlots(cluster)) {
+            const restoredCluster = restored.colorClusters.find(candidate => candidate.instanceId === cluster.instanceId && candidate.name === cluster.name);
+            const restoredSlot = restoredCluster?.colors.find(candidate => candidate.index === slot.index);
+            if (!slot.materialDefaultTargets?.length && !slot.materialEditBlockedReason) continue;
+            if (!restoredSlot) throw new Error("This older backup changes a guarded material's structure. Restore a backup made with the current tool.");
+            const restoredParts = restored.instanceParse.parsedInstances.filter(instance => (
+                instance.typeName === "app.CostumeMaterialData.MaterialData"
+                && instance.fields?.Clusters?.values?.some(reference => reference.instanceId === restoredCluster.instanceId)
+            )).map(instance => instance.fields?.Type?.value).sort();
+            if (JSON.stringify(restoredParts) !== JSON.stringify((cluster.materialPartTypes || []).slice().sort())) {
+                throw new Error("This older backup moves a guarded material to another costume part. Restore a backup made with the current tool.");
+            }
+            const baseline = target.cmd.semanticBaselineBuffer ?? target.cmd.originalBuffer;
+            if (!rgbaEquals(rgbaAtOffset(baseline, slot.color.absoluteOffset), rgbaAtOffset(restored.workingBuffer, restoredSlot.color.absoluteOffset))
+                || enabledAtOffset(baseline, slot.enable?.absoluteOffset, slot.enable?.byteLength) !== restoredSlot.enabled) {
+                throw new Error("This older backup enables an unsupported material slot. Restore a backup made with the current tool, or edit the shared material default directly.");
+            }
+        }
         return { target, restored };
     }));
 
-    for (const { target, restored } of parsedTargets) {
+    for (const { target, restored, materialBuffer } of parsedTargets) {
+        if (target.materialPath) {
+            state.materialDefaultBuffers.get(target.materialPath).workingBuffer = materialBuffer;
+            continue;
+        }
         target.cmd.workingBuffer = restored.workingBuffer;
         target.cmd.usrInspection = restored.usrInspection;
         target.cmd.rszInspection = restored.rszInspection;
@@ -5131,6 +5531,9 @@ async function restoreColorBackup(snapshotId) {
         }
     }
 
+    refreshMaterialDefaultTargets();
+    attachMdfFallbackColorsToCmdEntries();
+
     state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters || [];
     state.inspectorDirty = false;
     resetSyncSelections();
@@ -5140,7 +5543,7 @@ async function restoreColorBackup(snapshotId) {
     renderSyncPanels();
     renderCurrentChanges();
     updateExportButtons();
-    showStatus(colorBackupStatus, "good", `Restored “${label}” for ${targets.length} CMD file${targets.length === 1 ? "" : "s"}. Review Current Changes, then build a new ZIP to keep it.`);
+    showStatus(colorBackupStatus, "good", `Restored “${label}” for ${targets.length} color file${targets.length === 1 ? "" : "s"}. Review Current Changes, then build a new ZIP to keep it.`);
     return true;
 }
 
@@ -5165,6 +5568,8 @@ async function unloadCmd(index) {
         state.importedMod = null;
         state.customMdfMaterials = [];
         state.customMaterialMappings = [];
+        state.materialDefaultTargets = [];
+        state.materialDefaultBuffers.clear();
         clearReferenceImages();
         clearScreenshot();
         if (zipFileNameInput) zipFileNameInput.value = "";
@@ -5485,7 +5890,7 @@ function currentSurpriseTargetCount() {
 }
 
 function recomputeInspectorDirty() {
-    state.inspectorDirty = state.cmdEntries.some(cmd => (
+    state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(cmd => (
         diffBuffers(cmd.semanticBaselineBuffer ?? cmd.originalBuffer, cmd.workingBuffer).length > 0
     ));
 }
@@ -6159,18 +6564,12 @@ function renderColorClusters(clusters) {
         const list = document.createElement("div");
         list.className = "cluster-slot-list";
 
-        const shaderDetails = document.createElement("details");
-        shaderDetails.className = "shader-color-details";
-        const shaderSummary = document.createElement("summary");
-        shaderSummary.textContent = "CMD hair shader colors";
-        const shaderList = document.createElement("div");
-        shaderList.className = "cluster-slot-list shader-color-list";
-        shaderDetails.append(shaderSummary, shaderList);
-
         for (const color of cmdColorSlots(cluster)) {
             const row = document.createElement("div");
             row.className = "cluster-slot-row";
             row.dataset.parameter = color.runtimeName;
+            if (color.materialDefaultTargets?.length) row.dataset.materialDefault = "true";
+            if (color.materialEditBlockedReason) row.title = color.materialEditBlockedReason;
             if (!isSlotEnabled(color)) row.classList.add("inactive-slot");
             if (!isSlotEditable(color)) row.classList.add("readonly-slot");
 
@@ -6202,14 +6601,20 @@ function renderColorClusters(clusters) {
                 flags.classList.add("is-inactive");
                 if (Array.isArray(color.mdfFallbackRgba)) {
                     flags.classList.add("is-mdf-default");
-                    flags.textContent = "MDF default";
-                    flags.title = "CMD slot is inactive; the game uses this color from the MDF material.";
+                    flags.textContent = "material default";
+                    flags.title = color.materialDefaultTargets?.length
+                        ? materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets)
+                        : "This slot is inactive; the game uses the material's default color.";
                 } else {
                     flags.textContent = "inactive";
                 }
             } else {
                 flags.classList.add("is-active");
                 flags.textContent = "active";
+            }
+            if (color.materialEditBlockedReason) {
+                flags.textContent = "read only";
+                flags.title = color.materialEditBlockedReason;
             }
 
             const applyHex = () => {
@@ -6219,7 +6624,13 @@ function renderColorClusters(clusters) {
                     return;
                 }
                 hexInput.classList.remove("invalid");
-                applyColorEdit(color, rgba);
+                try {
+                    applyColorEdit(color, rgba);
+                } catch (error) {
+                    hexInput.value = slotHex(color);
+                    showStatus(parserStatus, "bad", error.message || String(error));
+                    return;
+                }
                 swatch.style.backgroundColor = rgbaToHexString(rgba);
                 friendly.textContent = describeColorName(rgba);
             };
@@ -6235,14 +6646,19 @@ function renderColorClusters(clusters) {
                 // semanticBaselineBuffer is the immutable post-rebuild
                 // baseline used for color diffs and restores.
                 const baseline = activeCmd?.semanticBaselineBuffer ?? activeCmd?.originalBuffer;
-                const originalRgba = activeCmd && Number.isInteger(offset)
+                const originalRgba = color.materialDefaultOriginalRgba || (activeCmd && Number.isInteger(offset)
                     ? rgbaAtOffset(baseline, offset)
-                    : rgba;
+                    : rgba);
                 openCustomColorPicker(swatch, rgba, newRgba => {
+                    try {
+                        applyColorEdit(color, newRgba);
+                    } catch (error) {
+                        showStatus(parserStatus, "bad", error.message || String(error));
+                        return;
+                    }
                     hexInput.value = rgbaToHexString(newRgba);
                     swatch.style.backgroundColor = hexInput.value;
                     friendly.textContent = describeColorName(newRgba);
-                    applyColorEdit(color, newRgba);
                 }, null, { originalRgba });
             });
 
@@ -6252,11 +6668,23 @@ function renderColorClusters(clusters) {
             if (isSlotEditable(color)) hexControl.append(createHexActionButtons());
 
             row.append(swatch, name, friendly, hexControl, flags);
-            (color.kind === "hair" ? shaderList : list).appendChild(row);
+            list.appendChild(row);
+            if (color.materialDefaultTargets?.length) {
+                const notice = document.createElement("p");
+                notice.className = "material-default-notice";
+                notice.dataset.materialDefaultNotice = "true";
+                notice.dataset.materialDefaultRootCount = String(new Set(color.materialDefaultTargets.map(target => target.root)).size);
+                notice.textContent = `${color.runtimeName}: ${materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets)}`;
+                list.appendChild(notice);
+            } else if (color.materialEditBlockedReason) {
+                const notice = document.createElement("p");
+                notice.className = "material-default-notice material-default-blocked";
+                notice.textContent = `${color.runtimeName}: ${color.materialEditBlockedReason}`;
+                list.appendChild(notice);
+            }
         }
 
         card.appendChild(list);
-        if (cluster.shaderColors?.length) card.appendChild(shaderDetails);
         clusterInspector.appendChild(card);
     }
 }
@@ -7312,6 +7740,7 @@ function bindUi() {
     discardCmdInspectorBtn?.addEventListener("click", () => {
         const cmd = state.cmdEntries[state.activeCmdIndex];
         if (!cmd) return;
+        if (cmd.metadata.variant === "standard" && cmd.metadata.paletteNumber === 1) revertMaterialDefaults();
 
         const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
         new Uint8Array(cmd.workingBuffer).set(new Uint8Array(baseline));

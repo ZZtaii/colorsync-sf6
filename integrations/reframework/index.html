@@ -15,7 +15,7 @@
     <section class="panel">
         <h1>Bring your in-game colors into Color Sync</h1>
         <p>Edit colors live with EMV / Lua Freecam, then transfer the edited slots with one copy and paste.</p>
-        <p><a class="secondary-button" href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Download the exporter on Nexus Mods</a></p>
+        <p><a class="secondary-button" href="./SF6-Color-Sync-REFramework-v1.5.zip">Download exporter v1.5</a> · <a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Nexus Mods page</a></p>
         <p>If EMV Engine and Lua Freecam are not set up yet, follow the <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a>. Keep REFramework installed.</p>
         <h2>Once EMV and Freecam are ready</h2>
         <ol>
@@ -30,8 +30,9 @@
     </section>
     <section class="panel">
         <h2>Supported colors</h2>
-        <p>The exporter includes edited CustomizeColor RGBA vectors and CMD hair colors: primary specular, secondary specular, occlusion, and rim light. This supports Ingrid’s hair, including Change Multiple edits in EMV’s cached meshes. Runtime RGB values convert automatically to visual CMD colors. Matching fields become active.</p>
+        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Runtime RGB values convert automatically to visual CMD colors. Matching supported slots become active. Named hair shader colors are omitted.</p>
         <p>Choose any loaded CMD as your target. Import updates its matching material and color names. Unchanged colors and other shader settings are omitted. Missing or ambiguous matches appear in the preview.</p>
+        <p>For inactive Color 1 defaults, load the complete mod ZIP and use Color Sync’s direct editor or sync controls. Freecam imports that would activate those defaults are blocked before applying changes.</p>
         <p>Open each mesh’s Materials editor that you want to include, including separate hair/head meshes. Copy scans the selected character’s current cache, including meshes opened since the last refresh. When character grouping is unavailable, refresh after opening another mesh, then select and export each mesh separately. Open EMV before editing so it can capture the original colors.</p>
         <p>The selector shows character names, players, and costumes, for example <strong>P1 - Ingrid C2 (8 cached meshes)</strong>. Names such as <code>esf032</code> appear as <strong>Ingrid</strong> even when costume information is unavailable. Open both players’ Materials and refresh to list both. Copy exports only the selected entry’s edits. Unknown costumes are labeled as unknown, and unidentified players include a unique object identifier.</p>
         <h2>Clipboard and undo</h2>

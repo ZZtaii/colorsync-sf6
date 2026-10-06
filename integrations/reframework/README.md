@@ -1,6 +1,7 @@
 # EMV / Freecam → SF6 Color Sync
 
-Download the exporter ZIP from
+Download the current [exporter v1.5 ZIP](SF6-Color-Sync-REFramework-v1.5.zip).
+The exporter is also available on
 [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
 If EMV Engine and Lua Freecam are not set up yet, follow the
 [EMV Engine and Lua Freecam setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
@@ -16,7 +17,7 @@ This companion script reads EMV's cached material values and adds an
 **SF6 Color Sync** panel under REFramework's Script Generated UI.
 
 1. Open the character's **Materials** editor in EMV / Freecam, then edit its
-   `CustomizeColor_N` or supported CMD hair colors normally. Open each mesh's Materials editor for
+   `CustomizeColor_N` slots normally. Open each mesh's Materials editor for
    meshes you want to include. EMV's **Change Multiple** edits are included
    when its affected meshes are in the material cache.
 2. Open **SF6 Color Sync**, click **Refresh characters**, and select the
@@ -53,18 +54,16 @@ click **Save color export JSON** and import
 ## Supported data
 
 - Exact material names and `CustomizeColor_N` indexes.
-- CMD hair colors: `PrimalySpecularColor` (primary specular),
-  `SecondarySpecularColor`, `OcclusionColor`, and `RimLight_Color`.
-  These support Ingrid's hair and any material using the corresponding CMD
-  Hair fields. The browser exposes them under **CMD hair shader colors**.
-  CMD spelling aliases `OcclutionColor` and `Rimlight_Color`, and
-  `PrimarySpecularColor`, are accepted and normalized by name.
-- `BaseColor` has no CMD Hair field and is omitted. Persisting it would require
-  an MDF edit shared by palettes using that MDF; this bridge edits CMDs only.
+- Named shader colors, including specular, occlusion, rim light, and `BaseColor`,
+  are omitted. Older transfers containing them show unsupported entries in the
+  browser preview; valid CustomizeColor entries remain available.
 - RGBA vectors between 0 and 1, exported as original runtime floats.
 - RGB converts from linear runtime values directly into sRGB CMD bytes, with
   rounding only at the final byte write. Alpha is scaled directly to 0–255.
 - Matching target slots are enabled when their enable field is writable.
+- Imports that would activate inactive Color 1 defaults are blocked before
+  applying any changes. Load the complete mod ZIP and use its direct color
+  editor or sync controls for those defaults.
 - Choose any loaded CMD as the target. Import modifies only that active CMD,
   matching exact material names and supported color parameter names. The exporter does
   not detect the source palette, and the browser ignores palette metadata in
@@ -110,7 +109,7 @@ different values for the same material/index are skipped rather than guessed.
 
 `skippedFields` counts unsupported or out-of-range edits in the scanned meshes.
 It does not count meshes that EMV has not cached, unchanged colors, or slots
-without an original cached value. Hair slots listed in a CMD may belong to a
+without an original cached value. Hair materials listed in a CMD may belong to a
 different in-game mesh from the clothing: open that mesh's Materials editor
 before editing and copying its colors.
 
@@ -122,13 +121,14 @@ REFramework/EMV objects and real CMD samples. Version 1.0 was also confirmed
 working in-game by the user; version 1.1 removes automatic palette detection.
 Version 1.2 scans newly cached meshes on every copy and rejects obsolete cache
 wrappers, with regression checks for hair opened after character refresh.
-Version 1.3 adds the four named CMD hair colors. Checks cover real Ingrid CMD
-offsets, active flags, byte-preserving export/import, undo, and browser edits.
-Its dropdown identifies player/costume groups and guards shared controllers,
+Version 1.3 added named CMD hair colors and player/costume groups. The dropdown
+guards shared controllers,
 identical raw mesh names, and shared hair resources.
 Version 1.4 resolves friendly character names from partial resources and runtime
 object names too. Checks cover every mapped character, unknown IDs, and names
-without costume information. The new runtime fields still need in-game confirmation.
+without costume information.
+Version 1.5 removes named hair shader color exports and controls while retaining
+player/costume identification and ordinary CustomizeColor transfers.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).

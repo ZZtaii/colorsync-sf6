@@ -17,7 +17,7 @@ const installGuide = [
     "SF6 Color Sync - Freecam Exporter",
     "",
     "FLUFFY MOD MANAGER INSTALLATION",
-    "Download: https://www.nexusmods.com/streetfighter6/mods/3837?tab=files",
+    `Download: https://colorsync-sf6.pages.dev/integrations/reframework/SF6-Color-Sync-REFramework-v${version}.zip`,
     "EMV Engine + Lua Freecam setup: https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s",
     "Once EMV Engine and Lua Freecam are ready:",
     "1. Put this ZIP in your Fluffy Mod Manager Games/SF6/Mods folder.",

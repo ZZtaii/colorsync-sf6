@@ -28,6 +28,9 @@ to a server.
 ## Detailed features
 
 - Edit colors for any material slot.
+- Edit inactive Color 1 material defaults from the actual mod ZIP while keeping
+  their CMD overrides inactive. Shared defaults show the affected palettes and
+  component variants before export.
 - Replace an exact color throughout the active CMD.
 - Randomize the active slots in one material with Surprise Me.
 - Add custom local images to the resizable reference viewer.
@@ -55,7 +58,9 @@ to a server.
 - Build a [Fluffy Manager](https://www.fluffyquack.com/)-ready mod ZIP with
   `modinfo.ini` and an optional screenshot.
 - Export a colors-only ZIP when you want the edited CMD files without the rest
-  of the imported archive.
+  of the imported archive. Material files required by default-color edits are
+  included too when they belong to the same mod component. Shared defaults in
+  dependent bundle variants require the full mod ZIP.
 - Optionally save CMD and ZIP exports directly to remembered folders in
   Chromium browsers; other browsers use normal downloads.
 
@@ -70,12 +75,34 @@ to a server.
 4. Review or revert the staged changes.
 5. Export modified CMD files, a colors-only ZIP, or a game-ready mod ZIP.
 
-CMD exports are patched at known absolute offsets in the working buffer. This
-tool does not rebuild RSZ graphs.  
+Normal CMD color exports patch existing color fields at known offsets. Material
+default edits patch existing MDF color properties with the game's linear RGB
+values; unrelated material properties and file structure are preserved.
+
+### Material defaults and inactive slots
+
+Load the complete mod ZIP when editing an inactive Color 1 CustomizeColor slot.
+If its material file is available, the editor updates the material default and
+retains the inactive CMD override. Defaults are shared by palettes that do not
+override that slot; the editor shows that scope. Existing active palette colors
+continue to use their CMD values.
+
+For component bundles, the editor also reads the material files from variants
+that explicitly depend on the selected Main files entry. Default edits update
+those matching variants together. Unrelated mod components remain untouched.
+Materials or color properties absent from the actual mod's MDF files are read
+only. A loose Color 1 CMD needs the full mod ZIP for inactive default edits.
+
+Use the full mod ZIP for shared defaults across bundle components. A single-mod
+colors-only ZIP can also carry its material edits. A CMD-only export cannot
+carry the material files. Current Changes, revert, saved color states,
+and color backups include material default edits. Palette duplication and
+Freecam imports that would activate an inactive default require the direct
+color editor or sync workflow instead.
 
 ## EMV / Lua Freecam color import
 
-Get the exporter from [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
+Get the current [exporter v1.5 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.5.zip).
 For EMV Engine and Lua Freecam setup, follow the
 [setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
 Once both are ready, enable the exporter ZIP in Fluffy Mod Manager.
@@ -84,9 +111,9 @@ in your game's `reframework/autorun` folder. Open Materials before editing color
 open REFramework's **SF6 Color Sync** panel, and click **Copy for Color Sync**.
 In section 2 of the browser editor, use **Import Freecam Colors** to paste,
 preview, and apply the supported slots to the active CMD of your choice.
-Material names and supported color parameter names determine matches. Alongside
-CustomizeColor slots, Ingrid's CMD hair specular, occlusion, and rim-light colors
-are supported. BaseColor belongs to the MDF and is omitted. Export normally.
+Material names and CustomizeColor indexes determine matches. Named shader
+colors are omitted. Inactive Color 1 defaults need the complete mod ZIP and
+the direct color editor or sync workflow. Export normally.
 See the [setup and format guide](integrations/reframework/README.md).
 
 ## Copyable color exports
@@ -94,8 +121,8 @@ See the [setup and format guide](integrations/reframework/README.md).
 In section 2, select the active color and open **Export Colors as String**.
 Use **Generate String** to view the export, or **Copy String** to generate and
 copy it directly. The export includes every active supported color field
-from the working CMD, including CustomizeColor slots, CMD hair colors, and
-applied edits. Inactive fields are omitted.
+from the working CMD's CustomizeColor slots, including applied edits.
+Inactive fields are omitted.
 Paste the string into **Import Freecam Colors**, preview it for your chosen
 CMD, then apply. RGB and alpha survive an export/import round trip exactly.
 

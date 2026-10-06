@@ -10,7 +10,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
     <meta property="og:title" content="SF6 CMD Color Sync Changelog">
-    <meta property="og:description" content="See what shipped in v1.0 and what’s new in v1.1.">
+    <meta property="og:description" content="See the material default color fixes in v1.2 and earlier releases.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/changelog/">
     <meta name="twitter:card" content="summary">
     <title>Changelog | SF6 CMD Color Sync</title>
@@ -87,8 +87,20 @@
             <div class="hero-copy"><div class="eyebrow">Release history</div><h1>Changelog</h1><p class="lead">What shipped with SF6 CMD Color Sync and what is planned next.</p></div>
         </section>
 
+        <section class="release" id="v1-2">
+            <div class="release-head"><div><div class="eyebrow">Latest release · October 6, 2026</div><div class="version"><h2>v1.2</h2><span class="status shipped">Released</span></div><p class="release-intro">Edit Color 1 material defaults without automatically activating inactive CMD overrides. This supports custom mods that need their default colors in the material files.</p></div></div>
+            <div class="feature-grid" style="margin-top:24px">
+                <article class="feature"><div class="feature-mark">MDF</div><h3>Edit the actual material default</h3><p>Load the complete mod ZIP to edit inactive Color 1 CustomizeColor defaults in the existing material files. Shared-default scope remains visible, and active palette colors retain their CMD values.</p></article>
+                <article class="feature"><div class="feature-mark">ZIP</div><h3>Support shared Main files and variants</h3><p>Find matching material files in explicitly dependent bundle variants. Use the full mod ZIP to preserve those components; single-mod colors-only exports include their required material files.</p></article>
+                <article class="feature"><div class="feature-mark">↶</div><h3>Review and restore default edits</h3><p>Material default edits participate in Current Changes, revert, saved color states, and original and dated color backups.</p></article>
+                <article class="feature"><div class="feature-mark">✓</div><h3>Check actual material slots</h3><p>Keep obsolete or unsupported slots read only when the loaded mod's material files are available. Loose Color 1 palettes need the complete mod ZIP for inactive default edits.</p></article>
+                <article class="feature"><div class="feature-mark">UI</div><h3>Remove hair shader controls</h3><p>Remove the CMD hair shader color section and named shader transfers. CustomizeColor editing and Freecam player and costume identification remain available; the companion exporter is updated to v1.5.</p></article>
+            </div>
+            <p class="note">The fix preserves ordinary palette editing. It does not assume that every inactive slot or every Color 1 edit causes a crash.</p>
+        </section>
+
         <section class="release" id="v1-1">
-            <div class="release-head"><div><div class="eyebrow">Latest release</div><div class="version"><h2>v1.1</h2><span class="status shipped">Released</span></div><p class="release-intro">v1.1 expands Color Sync from a CMD editor into a safer existing-mod workflow: import full archives, preserve their contents, add missing palettes, and restore earlier color states.</p></div></div>
+            <div class="release-head"><div><div class="eyebrow">Previous release</div><div class="version"><h2>v1.1</h2><span class="status shipped">Released</span></div><p class="release-intro">v1.1 expands Color Sync from a CMD editor into a safer existing-mod workflow: import full archives, preserve their contents, add missing palettes, and restore earlier color states.</p></div></div>
             <div class="release-layout">
                 <div class="feature-grid">
                     <article class="feature"><div class="feature-mark">ZIP</div><h3>Edit existing mod archives</h3><p>Load one mod ZIP, retain its metadata, screenshot, and unrelated files, then replace only edited CMD palettes on export.</p></article>
@@ -105,7 +117,7 @@
                     <figure class="release-visual"><img src="../data/feature-guide/mod-zip-import-ui.webp" alt="Build Mod section showing imported Black Widow Colors metadata, preserved screenshot, and export options."></figure>
                 </div>
             </div>
-            <p class="note"><strong>Released 11 August 2026.</strong> v1.1 is the current version of SF6 CMD Color Sync.</p>
+            <p class="note"><strong>Released 11 August 2026.</strong></p>
         </section>
 
         <section class="release" id="v1-0">

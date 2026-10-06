@@ -6401,11 +6401,20 @@ main.page-width {
     padding: 12px 15px; border-top: 1px solid var(--border);
     color: var(--muted); font-size: 0.85rem; line-height: 1.6;
 }
-/* Named CMD hair colors use the same controls as CustomizeColor slots. */
-.shader-color-details { margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--border); }
-.shader-color-details > summary { padding: 4px 0 10px; cursor: pointer; font-weight: 600; }
-.shader-color-list .cluster-slot-name { overflow-wrap: anywhere; }
-@media (max-width: 720px) {
-    #cluster-inspector .shader-color-list .hex-input-control { grid-area: hex; width: 100%; }
-    #cluster-inspector .shader-color-list .cluster-slot-name { white-space: normal !important; }
+.material-default-notice,
+.material-default-scope {
+    margin: 0;
+    padding: 0.4rem 0.7rem;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--muted);
+}
+
+.material-default-notice {
+    border-left: 2px solid var(--accent);
+    margin-bottom: 0.35rem;
+}
+
+.material-default-blocked {
+    border-left-color: var(--muted);
 }

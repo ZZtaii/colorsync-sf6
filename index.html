@@ -75,7 +75,7 @@
             </div>
             <div class="header-notices">
                 <div class="privacy-note"><span class="privacy-dot"></span>Files are processed locally. Nothing is uploaded.</div>
-                <a class="release-note" href="./changelog/#v1-1"><span class="release-dot"></span><strong>Updated to v1.1</strong><span>See what’s new →</span></a>
+                <a class="release-note" href="./changelog/#v1-2"><span class="release-dot"></span><strong>Updated to v1.2</strong><span>See what’s new →</span></a>
             </div>
         </div>
     </header>
@@ -296,9 +296,9 @@
                 </summary>
                 <div class="collapsible-section-body">
                     <p>Paste a color string from Color Sync or use <strong>Copy for Color Sync</strong> in REFramework’s SF6 Color Sync panel after editing in EMV / Lua Freecam. Preview and apply the colors to the active CMD.</p>
-                    <p class="freecam-setup-link"><a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Download the exporter on Nexus Mods</a> · <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a> · <a href="./integrations/reframework/" target="_blank" rel="noopener">Quick setup guide</a></p>
+                    <p class="freecam-setup-link"><a href="./integrations/reframework/SF6-Color-Sync-REFramework-v1.5.zip">Download exporter v1.5</a> · <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a> · <a href="./integrations/reframework/" target="_blank" rel="noopener">Quick setup guide</a></p>
                     <p>Once EMV Engine and Lua Freecam are set up, enable the exporter ZIP in Fluffy. Open Materials before editing, then use <strong>SF6 Color Sync → Refresh characters → Copy for Color Sync</strong> in REFramework.</p>
-                    <p>Choose the active CMD you want to update. Matching material and color fields will receive the imported colors, including supported CMD hair colors.</p>
+                    <p>Choose the active CMD you want to update. Matching materials and CustomizeColor slots will receive the imported colors.</p>
                     <textarea id="freecam-color-text" rows="4" aria-label="Color import string" spellcheck="false" placeholder="Paste the complete SF6COLORS:1: export string here"></textarea>
                     <div class="freecam-import-actions">
                         <button id="paste-freecam-colors" type="button" class="secondary-button" disabled>Paste from Clipboard</button>
@@ -321,7 +321,7 @@
                     <span class="collapsible-section-hint">copy the active CMD’s colors</span>
                 </summary>
                 <div class="collapsible-section-body">
-                    <p>Export all active supported colors from the selected CMD, including CustomizeColor slots, CMD hair colors, and applied edits. Paste the string into <strong>Import Freecam Colors</strong> for any CMD you choose.</p>
+                    <p>Export all active CustomizeColor slots from the selected CMD, including your applied edits. Paste the string into <strong>Import Freecam Colors</strong> for any CMD you choose.</p>
                     <p id="color-string-export-help" class="freecam-setup-link">Inactive slots are omitted. Matching slots become active when imported.</p>
                     <div class="freecam-import-actions">
                         <button id="generate-color-string" type="button" class="secondary-button" disabled>Generate String</button>
@@ -793,7 +793,7 @@
                 <span class="section-number">5</span>
                 <div>
                     <h2>Build Mod</h2>
-                    <p class="section-description">Export the currently staged CMD changes as modified CMD files or a ready-to-use mod ZIP.</p>
+                    <p class="section-description">Export staged colors as modified CMD files or a ready-to-use mod ZIP. Shared material defaults require their material files; edits shared across separate variants require the full mod ZIP.</p>
                 </div>
             </div>
 

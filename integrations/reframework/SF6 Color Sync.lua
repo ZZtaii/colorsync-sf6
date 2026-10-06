@@ -1,4 +1,4 @@
--- SF6 Color Sync clipboard bridge v1.4
+-- SF6 Color Sync clipboard bridge v1.5
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
@@ -13,15 +13,8 @@ local character_names = {
     esf021="Jamie", esf022="Akuma", esf025="Sagat", esf026="M. Bison", esf027="Terry",
     esf028="Mai", esf029="Elena", esf030="C.Viper", esf031="Alex", esf032="Ingrid", esf033="Yasmine",
 }
-local hair_parameters = {
-    OcclusionColor = "OcclusionColor", OcclutionColor = "OcclusionColor",
-    PrimalySpecularColor = "PrimalySpecularColor", PrimarySpecularColor = "PrimalySpecularColor",
-    SecondarySpecularColor = "SecondarySpecularColor",
-    RimLight_Color = "RimLight_Color", Rimlight_Color = "RimLight_Color",
-}
-
 local function color_parameter(name)
-    return name:match("^CustomizeColor_%d+$") and name or hair_parameters[name]
+    return name:match("^CustomizeColor_%d+$") and name or nil
 end
 
 local function rgba(value)
@@ -260,7 +253,7 @@ local function build_export(group)
     group.objects = export_objects
     if info then group.source, group.info = source, info end
     group.label = group.info.title .. " (" .. #export_objects .. " cached meshes)"
-    if #changes == 0 then error("No edited supported CMD colors found. Use CustomizeColor_N or CMD hair colors; BaseColor requires an MDF edit.") end
+    if #changes == 0 then error("No edited CustomizeColor_N colors found. Other shader parameters are unsupported; BaseColor requires an MDF edit.") end
     if #changes > 4096 then error("Too many edits for one export (maximum 4096).") end
     table.sort(changes, function(a, b)
         local a_key, b_key = a.material .. "|" .. a.parameter .. "|" .. a.mesh, b.material .. "|" .. b.parameter .. "|" .. b.mesh
@@ -299,7 +292,7 @@ re.on_draw_ui(function()
         local group = groups[changed and new_index or selected_index]
         if group.info.resource then imgui.text("Costume resource: " .. group.info.resource) end
         imgui.text("Only this entry's cached meshes are exported. Open both players' Materials, then Refresh characters to list both.")
-        imgui.text("Exports edited CustomizeColor_N and CMD hair colors, including EMV Change Multiple edits.")
+        imgui.text("Exports edited CustomizeColor_N colors, including EMV Change Multiple edits.")
         if group.key:match("^mesh:") then
             imgui.text("Character grouping unavailable. Open hair/head Materials, refresh characters, and export each mesh separately.")
         end
