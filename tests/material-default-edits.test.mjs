@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { parseMdfMaterialNames } from "../lib/mdf-materials.js";
-import { cmdRgbaToLinearFloatRgba } from "../lib/sf6-color-space.js";
-import { discoverMaterialDefaultTargets, writeMaterialDefaultColor } from "../lib/material-default-edits.js";
+import { cmdRgbaToLinearFloatRgba, linearFloatRgbaToCmdRgba } from "../lib/sf6-color-space.js";
+import { discoverMaterialDefaultTargets, writeMaterialDefaultColor, writeMaterialDefaultLinearColor } from "../lib/material-default-edits.js";
+import { parseFreecamColorTransfer, planFreecamColorImport } from "../lib/freecam-colors.js";
 
 const filename = "synthetic.mdf2.40";
 const encode = text => new TextEncoder().encode(text);
@@ -132,6 +133,88 @@ test("three-component vectors leave padding and the following float untouched", 
     assert.equal(result.componentCount, 3);
     assert.deepEqual(new Uint8Array(result.buffer).slice(result.dataOffset + 12), new Uint8Array(buffer).slice(result.dataOffset + 12));
     assert.deepEqual(parseMdfMaterialNames(result.buffer, filename)[0].customizeColors[0].cmdRgba, [38, 114, 190, 255]);
+});
+
+test("runtime default writes retain float32 precision without a CMD byte round-trip", () => {
+    const buffer = makeMdf();
+    const originalHash = hash(buffer);
+    const runtimeRgba = [0.00021789, 0.25123456, 0.78912345, 0.54321987];
+    const originalRgba = runtimeRgba.slice();
+    const result = writeMaterialDefaultLinearColor(buffer, filename, "esf_Swimwear", 0, runtimeRgba);
+    const stored = runtimeRgba.map(Math.fround);
+    assert.equal(result.changed, true);
+    assert.notEqual(result.buffer, buffer);
+    assert.equal(hash(buffer), originalHash);
+    assert.deepEqual(runtimeRgba, originalRgba);
+    assert.equal(result.buffer.byteLength, buffer.byteLength);
+    assert.deepEqual(result.linearRgba, stored);
+    assert.deepEqual(result.rgba, linearFloatRgbaToCmdRgba(stored));
+    assert.deepEqual(parseMdfMaterialNames(result.buffer, filename)[0].customizeColors[0].linearRgba, stored);
+    const quantized = cmdRgbaToLinearFloatRgba(linearFloatRgbaToCmdRgba(runtimeRgba)).map(Math.fround);
+    assert.ok(stored.every((channel, index) => channel !== quantized[index]));
+    const before = new Uint8Array(buffer);
+    const after = new Uint8Array(result.buffer);
+    for (let offset = 0; offset < before.length; offset += 1) {
+        if (offset >= result.dataOffset && offset < result.dataOffset + 16) continue;
+        assert.equal(after[offset], before[offset], `untargeted MDF byte ${offset}`);
+    }
+    const repeated = writeMaterialDefaultLinearColor(result.buffer, filename, "esf_Swimwear", 0, runtimeRgba);
+    assert.equal(repeated.changed, false);
+    assert.equal(hash(repeated.buffer), hash(result.buffer));
+});
+
+test("runtime default writes accept typed floats and keep RGB-only alpha unchanged", () => {
+    const buffer = makeMdf([{ name: "esf_Trim", colors: [{ index: 0, values: [0.2, 0.4, 0.6] }] }]);
+    const rgba = new Float64Array([0.01234567, 0.23456789, 0.87654321, 1]);
+    const originalRgba = rgba.slice();
+    const result = writeMaterialDefaultLinearColor(buffer, filename, "esf_Trim", 0, rgba);
+    assert.equal(result.componentCount, 3);
+    assert.deepEqual(rgba, originalRgba);
+    assert.deepEqual(new Uint8Array(result.buffer).slice(result.dataOffset + 12), new Uint8Array(buffer).slice(result.dataOffset + 12));
+    assert.deepEqual(parseMdfMaterialNames(result.buffer, filename)[0].customizeColors[0].linearRgba,
+        Array.from(rgba, Math.fround));
+    const before = hash(buffer);
+    assert.throws(() => writeMaterialDefaultLinearColor(buffer, filename, "esf_Trim", 0, [0.1, 0.2, 0.3, 0.99999999]), /alpha must remain 1/);
+    assert.equal(hash(buffer), before);
+});
+
+test("invalid runtime RGBA and unsafe material addresses fail without input mutations", () => {
+    const buffer = makeMdf();
+    const before = hash(buffer);
+    for (const malformed of [null, {}, [0, 0, 1], [0, 0, 0, 1, 1], new DataView(new ArrayBuffer(16))]) {
+        assert.throws(() => writeMaterialDefaultLinearColor(buffer, filename, "esf_Swimwear", 0, malformed), /finite linear RGBA floats/);
+    }
+    for (const bad of [-0.001, 1.001, NaN, Infinity, -Infinity, "0.1", null, undefined]) {
+        assert.throws(() => writeMaterialDefaultLinearColor(buffer, filename, "esf_Swimwear", 0, [bad, 0.2, 0.3, 1]), /finite linear RGBA floats/);
+    }
+    assert.throws(() => writeMaterialDefaultLinearColor(buffer, filename, "esf_Other", 0, [0.1, 0.2, 0.3, 1]), /not found/);
+    assert.throws(() => writeMaterialDefaultLinearColor(buffer, filename, "esf_Swimwear", 1, [0.1, 0.2, 0.3, 1]), /does not declare/);
+    assert.throws(() => writeMaterialDefaultLinearColor(buffer.slice(0, 90), filename, "esf_Swimwear", 0, [0.1, 0.2, 0.3, 1]), /outside/);
+    assert.equal(hash(buffer), before);
+    const duplicateNames = makeMdf([0, 1].map(() => ({ name: "esf_Trim", colors: [{ index: 0, values: [0, 0, 0, 1] }] })));
+    assert.throws(() => writeMaterialDefaultLinearColor(duplicateNames, filename, "esf_Trim", 0, [0.1, 0.2, 0.3, 1]), /ambiguous/);
+    assert.equal(writeMaterialDefaultLinearColor(duplicateNames, filename, "esf_Trim", 0, [0.1, 0.2, 0.3, 1], { materialIndex: 1 }).materialIndex, 1);
+});
+
+test("Freecam plans retain a separate unquantized runtime RGBA copy for MDF writes", () => {
+    const workingBuffer = new ArrayBuffer(16);
+    new Uint8Array(workingBuffer).set([1, 0, 0, 0, 0, 0, 0, 255]);
+    const cmd = { workingBuffer, colorClusters: [{ name: "esf_Swimwear", colors: [{
+        index: 0, enabled: true, enable: { absoluteOffset: 0, byteLength: 1 }, color: { absoluteOffset: 4 },
+    }] }] };
+    const rawRgba = [0.00021789, 0.25123456, 0.78912345, 0.54321987];
+    const document = parseFreecamColorTransfer(JSON.stringify({
+        format: "sf6-freecam-colors", version: 1, colorSpace: "linear",
+        changes: [{ material: "esf_Swimwear", parameter: "CustomizeColor_0", rgba: rawRgba }],
+    }));
+    const before = workingBuffer.slice(0);
+    const [operation] = planFreecamColorImport(document, cmd).operations;
+    assert.deepEqual(operation.rgba, linearFloatRgbaToCmdRgba(rawRgba));
+    assert.deepEqual(operation.linearRgba, rawRgba);
+    assert.notEqual(operation.linearRgba, document.changes[0].rgba);
+    operation.linearRgba[0] = 0;
+    assert.deepEqual(document.changes[0].rgba, rawRgba);
+    assert.deepEqual(workingBuffer, before);
 });
 
 test("missing, ambiguous, unsupported and invalid requests never mutate their input", () => {

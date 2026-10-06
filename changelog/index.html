@@ -10,7 +10,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
     <meta property="og:title" content="SF6 CMD Color Sync Changelog">
-    <meta property="og:description" content="See the material default color fixes in v1.2 and earlier releases.">
+    <meta property="og:description" content="See the Freecam import and exporter improvements in v1.3 and earlier releases.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/changelog/">
     <meta name="twitter:card" content="summary">
     <title>Changelog | SF6 CMD Color Sync</title>
@@ -87,8 +87,17 @@
             <div class="hero-copy"><div class="eyebrow">Release history</div><h1>Changelog</h1><p class="lead">What shipped with SF6 CMD Color Sync and what is planned next.</p></div>
         </section>
 
+        <section class="release" id="v1-3">
+            <div class="release-head"><div><div class="eyebrow">Latest release · October 6, 2026</div><div class="version"><h2>v1.3</h2><span class="status shipped">Released</span></div><p class="release-intro">Import Freecam edits into shared material defaults and copy colors from the edited character without extra costume entries.</p></div></div>
+            <div class="feature-grid" style="margin-top:24px">
+                <article class="feature"><div class="feature-mark">MDF</div><h3>Import shared defaults safely</h3><p>With the complete mod ZIP loaded, Freecam imports update existing material defaults while preserving inactive CMD overrides. Preview the shared palette and variant scope before applying.</p></article>
+                <article class="feature"><div class="feature-mark">RGB</div><h3>Preserve runtime colors</h3><p>Material imports store the original runtime float values directly. Undo and saved color states include the affected material defaults.</p></article>
+                <article class="feature"><div class="feature-mark">1.6</div><h3>Show the edited character</h3><p>Exporter v1.6 lists characters with edited supported colors and automatically selects a single result. Reused costume parts stay with their owning body costume.</p></article>
+            </div>
+        </section>
+
         <section class="release" id="v1-2">
-            <div class="release-head"><div><div class="eyebrow">Latest release · October 6, 2026</div><div class="version"><h2>v1.2</h2><span class="status shipped">Released</span></div><p class="release-intro">Edit Color 1 material defaults without automatically activating inactive CMD overrides. This supports custom mods that need their default colors in the material files.</p></div></div>
+            <div class="release-head"><div><div class="eyebrow">Previous release · October 6, 2026</div><div class="version"><h2>v1.2</h2><span class="status shipped">Released</span></div><p class="release-intro">Edit Color 1 material defaults without automatically activating inactive CMD overrides. This supports custom mods that need their default colors in the material files.</p></div></div>
             <div class="feature-grid" style="margin-top:24px">
                 <article class="feature"><div class="feature-mark">MDF</div><h3>Edit the actual material default</h3><p>Load the complete mod ZIP to edit inactive Color 1 CustomizeColor defaults in the existing material files. Shared-default scope remains visible, and active palette colors retain their CMD values.</p></article>
                 <article class="feature"><div class="feature-mark">ZIP</div><h3>Support shared Main files and variants</h3><p>Find matching material files in explicitly dependent bundle variants. Use the full mod ZIP to preserve those components; single-mod colors-only exports include their required material files.</p></article>

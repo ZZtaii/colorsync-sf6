@@ -1,4 +1,4 @@
--- SF6 Color Sync clipboard bridge v1.5
+-- SF6 Color Sync clipboard bridge v1.6
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
@@ -14,7 +14,7 @@ local character_names = {
     esf028="Mai", esf029="Elena", esf030="C.Viper", esf031="Alex", esf032="Ingrid", esf033="Yasmine",
 }
 local function color_parameter(name)
-    return name:match("^CustomizeColor_%d+$") and name or nil
+    return type(name) == "string" and name:match("^CustomizeColor_%d+$") and name or nil
 end
 
 local function rgba(value)
@@ -125,7 +125,7 @@ local function context_for(object)
     local id, costume, resource_path = resource_for(object)
     id = id or character_id(object.name) or character_id(object.name_w_parent)
     local xform = object.xform
-    local controller_root, actor_root, player_label
+    local controller_root, controller_branch, actor_root, player_label, child
     for _ = 1, 32 do
         if not xform then break end
         local address = tostring(xform:get_address())
@@ -136,14 +136,24 @@ local function context_for(object)
             break
         end
         local ok, controller = pcall(controller_for, xform)
-        if ok and controller and not controller_root then controller_root = xform end
+        if ok and controller and not controller_root then
+            controller_root = xform
+            -- Without Freecam player roots, a shared controller can contain
+            -- sibling actor branches. Keep those branches separate; a body
+            -- cached for one branch must not claim another actor's donor part.
+            if child and child ~= object.xform then
+                local cached_child = held_transforms and held_transforms[child]
+                if not cached_child or not cached_child.materials or #cached_child.materials == 0 then
+                    controller_branch = child
+                end
+            end
+        end
         local parent_ok, parent = pcall(function() return xform:call("get_Parent") end)
         if not parent_ok then break end
-        xform = parent
+        child, xform = xform, parent
     end
     -- Actor roots take precedence over a controller shared by multiple actors.
-    -- Partition by loaded costume resources too; neither key restricts import.
-    local owner = actor_root or controller_root
+    local owner = actor_root or controller_branch or controller_root
     local address = tostring((owner or object.xform):get_address())
     local owner_name = owner and transform_name(owner) or object.name_w_parent or object.name or "Selected mesh"
     local character_label = character_names[id] or (id and ("Unknown character (" .. id .. ")")) or "Unknown character"
@@ -158,14 +168,18 @@ local function context_for(object)
     local source = { object = label }
     local main_material = false
     for _, material in ipairs(object.materials or {}) do
-        if material.name == "esf_Body00" then main_material = true end
+        if type(material.name) == "string" and material.name:match("^esf_Body%d+$") then main_material = true end
     end
-    local info = { title = label, resource = resource_path,
+    local owner_key = actor_root and ("actor:" .. address)
+        or controller_root and ("controller:" .. tostring(controller_root:get_address())
+            .. (controller_branch and ("|branch:" .. address) or ""))
+        or ("mesh:" .. address)
+    local resource_key = (id or "unknown") .. "|" .. (costume or "unknown")
+    local info = { title = label, resource = resource_path, owner_key = owner_key,
+        owner_kind = actor_root and "actor" or owner and "controller" or "mesh",
+        resource_key = resource_key, character_id = id, costume = costume, main_material = main_material,
         priority = id and ((main_material and 4 or 0) + (costume and 2 or 1)) or 0 }
-    -- Known actors own their hair/head even when those parts reuse resources
-    -- from another costume. Resource partitioning is only a controller fallback.
-    local key = actor_root and ("actor:" .. address)
-        or ((owner and "controller:" or "mesh:") .. address .. "|" .. (id or "unknown") .. "|" .. (costume or "unknown"))
+    local key = actor_root and owner_key or (owner_key .. "|" .. resource_key)
     -- Missing controller: keep meshes separate rather than mix two players.
     return key, source, info
 end
@@ -179,79 +193,139 @@ local function has_colors(object)
     return false
 end
 
-local function refresh_groups()
-    export_text, status = "", ""
+local function edited_signature(object)
+    local parts = {}
+    for _, material in ipairs(object.materials or {}) do
+        for index, parameter in ipairs(material.variable_names or {}) do
+            local current = material.variables and material.variables[index]
+            local original = material.orig_vars and material.orig_vars[index]
+            if color_parameter(parameter) and current ~= nil and original ~= nil and differs(current, original) then
+                local color = rgba(current)
+                if color and in_range(color) then
+                    parts[#parts + 1] = table.concat({material.name or "", parameter,
+                        string.format("%.17g,%.17g,%.17g,%.17g", table.unpack(color))}, "|")
+                end
+            end
+        end
+    end
+    table.sort(parts)
+    return #parts > 0 and (tostring(object) .. "|" .. table.concat(parts, ";")) or nil
+end
+
+local function collect_groups()
     refresh_player_roots()
-    local found = {}
+    local entries, body_anchors = {}, {}
+    -- A costume can reuse parts from another resource folder. Locate its body
+    -- before grouping those parts; unedited bodies still identify the costume.
     for _, object in pairs(held_transforms or {}) do
         local ok, key, source, info = pcall(function()
-            if not object.xform or not has_colors(object) then return end
+            if not object.xform or not object.materials then return end
             return context_for(object)
         end)
         if ok and key then
-            local group = found[key] or { key = key, source = source, info = info, objects = {} }
-            if info.priority > group.info.priority then group.source, group.info = source, info end
-            found[key] = group
-            group.objects[#group.objects + 1] = object
+            entries[#entries + 1] = {object = object, key = key, source = source, info = info}
+            if info.owner_kind == "controller" and info.main_material and info.character_id and info.costume then
+                local anchors = body_anchors[info.owner_key] or {}
+                anchors[info.resource_key] = {source = source, info = info}
+                body_anchors[info.owner_key] = anchors
+            end
         end
     end
+    local found, object_keys = {}, {}
+    for _, entry in ipairs(entries) do
+        local object, key, source, info = entry.object, entry.key, entry.source, entry.info
+        if has_colors(object) then
+            local anchors = body_anchors[info.owner_key]
+            if anchors then
+                local single_anchor, count = nil, 0
+                for _, anchor in pairs(anchors) do single_anchor, count = anchor, count + 1 end
+                -- Multiple actual bodies under a shared controller remain
+                -- partitioned. A single body owns all its reused donor parts.
+                if count == 1 then
+                    key = info.owner_key .. "|" .. single_anchor.info.resource_key
+                    source, info = single_anchor.source, single_anchor.info
+                end
+            end
+            local group = found[key] or {key = key, source = source, info = info, objects = {}, edit_signatures = {}}
+            if info.priority > group.info.priority then group.source, group.info = source, info end
+            group.objects[#group.objects + 1] = object
+            local signature = edited_signature(object)
+            if signature then group.edit_signatures[#group.edit_signatures + 1] = signature end
+            found[key], object_keys[object] = group, key
+        end
+    end
+    for _, group in pairs(found) do
+        table.sort(group.edit_signatures)
+        group.edited = #group.edit_signatures > 0
+        group.edit_signature = table.concat(group.edit_signatures, "\n")
+    end
+    return found, object_keys
+end
+
+local function refresh_groups(reset_output)
+    local previous_key, previous_groups = selected_key, {}
+    for _, group in ipairs(groups) do previous_groups[group.key] = group end
+    local found = collect_groups()
     groups = {}
     for _, group in pairs(found) do
-        group.label = group.info.title .. " (" .. #group.objects .. " cached meshes)"
-        groups[#groups + 1] = group
+        if group.edited then
+            local previous = previous_groups[group.key]
+            -- Automatic updates retain old wrappers until Copy checks them.
+            -- Explicit Refresh accepts the current cache as a new snapshot.
+            group.snapshot_objects = not reset_output and previous and previous.snapshot_objects or group.objects
+            group.label = group.info.title .. " (" .. #group.objects .. " cached meshes)"
+            groups[#groups + 1] = group
+        end
     end
     table.sort(groups, function(a, b) return a.label < b.label end)
     local selected_exists = false
     for _, group in ipairs(groups) do if group.key == selected_key then selected_exists = true end end
     if not selected_exists then selected_key = groups[1] and groups[1].key or nil end
+    local previous = previous_groups[previous_key]
+    local current = selected_key and found[selected_key]
+    if reset_output or previous_key ~= selected_key or not previous or not current
+        or previous.edit_signature ~= current.edit_signature then
+        export_text, status = "", ""
+    end
 end
 
 local function build_export(group)
-    refresh_player_roots()
+    local current_groups, object_keys = collect_groups()
     local changes, skipped, stale = {}, 0, 0
-    local source, info
-    for _, object in ipairs(group.objects) do
-        local ok, key = pcall(context_for, object)
-        if not ok or key ~= group.key or held_transforms[object.xform] ~= object then
+    for _, object in ipairs(group.snapshot_objects or group.objects) do
+        if object_keys[object] ~= group.key or held_transforms[object.xform] ~= object then
             stale = stale + 1
         end
     end
     if stale > 0 then error("Character objects changed. Refresh characters and export again.") end
-    -- EMV adds meshes to its cache as their Materials panels are opened. The
-    -- character picker is a snapshot, but Copy must include newly cached hair
-    -- and head meshes belonging to the selected player. Never create wrappers
+    -- Copy scans EMV's current cache again to include newly opened parts
+    -- belonging to the selected player. Never create wrappers
     -- or refresh materials here: that could replace EMV's original colors.
-    local export_objects = {}
-    for _, object in pairs(held_transforms or {}) do
-        local ok, key, current_source, current_info = pcall(function()
-            if not object.xform or not has_colors(object) then return end
-            return context_for(object)
-        end)
-        if ok and key == group.key then
-            export_objects[#export_objects + 1] = object
-            if not info or current_info.priority > info.priority then source, info = current_source, current_info end
-            for _, material in ipairs(object.materials or {}) do
-                for index, parameter in ipairs(material.variable_names or {}) do
-                    local current = material.variables and material.variables[index]
-                    local original = material.orig_vars and material.orig_vars[index]
-                    if current ~= nil and original ~= nil and differs(current, original) then
-                        local color = rgba(current)
-                        local supported_parameter = color_parameter(parameter)
-                        if supported_parameter and color and in_range(color) then
-                            changes[#changes + 1] = {
-                                material = material.name, parameter = supported_parameter, rgba = color,
-                                mesh = object.name_w_parent or object.name or "",
-                            }
-                        else
-                            skipped = skipped + 1
-                        end
+    local current_group = current_groups[group.key]
+    local export_objects = current_group and current_group.objects or {}
+    for _, object in ipairs(export_objects) do
+        for _, material in ipairs(object.materials or {}) do
+            for index, parameter in ipairs(material.variable_names or {}) do
+                local current = material.variables and material.variables[index]
+                local original = material.orig_vars and material.orig_vars[index]
+                if current ~= nil and original ~= nil and differs(current, original) then
+                    local color = rgba(current)
+                    local supported_parameter = color_parameter(parameter)
+                    if supported_parameter and color and in_range(color) then
+                        changes[#changes + 1] = {
+                            material = material.name, parameter = supported_parameter, rgba = color,
+                            mesh = object.name_w_parent or object.name or "",
+                        }
+                    else
+                        skipped = skipped + 1
                     end
                 end
             end
         end
     end
     group.objects = export_objects
-    if info then group.source, group.info = source, info end
+    group.snapshot_objects = export_objects
+    if current_group then group.source, group.info = current_group.source, current_group.info end
     group.label = group.info.title .. " (" .. #export_objects .. " cached meshes)"
     if #changes == 0 then error("No edited CustomizeColor_N colors found. Other shader parameters are unsupported; BaseColor requires an MDF edit.") end
     if #changes > 4096 then error("Too many edits for one export (maximum 4096).") end
@@ -261,7 +335,7 @@ local function build_export(group)
     end)
     local encoded = json.dump_string({
         format = "sf6-freecam-colors", version = 1, colorSpace = "linear",
-        source = source or group.source, changes = changes, skippedFields = skipped,
+        source = group.source, changes = changes, skippedFields = skipped,
     })
     if type(encoded) ~= "string" or encoded == "" then error("REFramework could not encode the color export.") end
     local text = PREFIX .. ascii_json(encoded)
@@ -277,21 +351,30 @@ re.on_draw_ui(function()
         imgui.tree_pop()
         return
     end
+    imgui.text("Exporter v1.6")
     imgui.text("Edit colors in EMV / Freecam, then copy them into Color Sync.")
-    if imgui.button("Refresh characters") or #groups == 0 then refresh_groups() end
+    refresh_groups(imgui.button("Refresh characters"))
     if #groups == 0 then
-        imgui.text("No material caches found. Open the character's Materials editor in EMV first.")
+        imgui.text("No edited CustomizeColor_N colors found. Open the costume's Materials editor in EMV and edit its colors.")
     else
         local labels, selected_index = {}, 1
         for index, group in ipairs(groups) do
             labels[index] = group.label
             if group.key == selected_key then selected_index = index end
         end
-        local changed, new_index = imgui.combo("Character / mesh", selected_index, labels)
-        if changed then selected_key, export_text, status = groups[new_index].key, "", "" end
-        local group = groups[changed and new_index or selected_index]
+        local group = groups[selected_index]
+        if #groups == 1 then
+            imgui.text("Edited costume: " .. group.label)
+        else
+            local changed, new_index = imgui.combo("Edited costume", selected_index, labels)
+            if changed then
+                selected_key, export_text, status = groups[new_index].key, "", ""
+                group = groups[new_index]
+            end
+        end
         if group.info.resource then imgui.text("Costume resource: " .. group.info.resource) end
-        imgui.text("Only this entry's cached meshes are exported. Open both players' Materials, then Refresh characters to list both.")
+        imgui.text("Only costumes with edited CustomizeColor_N colors are listed. This list updates automatically as you change colors.")
+        imgui.text("Use Refresh characters if the character objects change.")
         imgui.text("Exports edited CustomizeColor_N colors, including EMV Change Multiple edits.")
         if group.key:match("^mesh:") then
             imgui.text("Character grouping unavailable. Open hair/head Materials, refresh characters, and export each mesh separately.")

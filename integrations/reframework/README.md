@@ -1,6 +1,6 @@
 # EMV / Freecam → SF6 Color Sync
 
-Download the current [exporter v1.5 ZIP](SF6-Color-Sync-REFramework-v1.5.zip).
+Download the current [exporter v1.6 ZIP](SF6-Color-Sync-REFramework-v1.6.zip).
 The exporter is also available on
 [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
 If EMV Engine and Lua Freecam are not set up yet, follow the
@@ -10,6 +10,8 @@ Keep REFramework installed.
 Once EMV Engine and Lua Freecam are ready, place the exporter ZIP in Fluffy
 Mod Manager's `Games/SF6/Mods` folder. Refresh the mod list, enable
 **SF6 Color Sync - Freecam Exporter**, then start SF6.
+When upgrading, disable the older exporter entry before enabling v1.6 and
+restart the game to load the new script.
 
 For manual installation, place `SF6 Color Sync.lua` in your SF6 game's
 `reframework/autorun/` folder.
@@ -20,13 +22,16 @@ This companion script reads EMV's cached material values and adds an
    `CustomizeColor_N` slots normally. Open each mesh's Materials editor for
    meshes you want to include. EMV's **Change Multiple** edits are included
    when its affected meshes are in the material cache.
-2. Open **SF6 Color Sync**, click **Refresh characters**, and select the
-   character. Entries show the Freecam player, character, costume resource, and
+2. Open **SF6 Color Sync**. Only characters with edited supported colors appear.
+   A single edited character is selected automatically. When several have edits,
+   choose the character to export. Entries show the Freecam player, character, costume resource, and
    cached mesh count, for example **P1 - Ingrid C2 (8 cached meshes)**.
    Freecam's player roots keep the two actors separate even if a color controller
    is shared. A player owns its hair/head even when those reuse another costume's
    resources; the main body resource supplies the label when available.
-   Without player roots, groups use the controller and costume resource.
+   Without player roots, groups use the controller and its body costume when
+   ownership is unambiguous. Reused parts from another costume stay in that group;
+   unedited cached characters do not add entries.
    If neither is available, select individual meshes and export/import separately.
    Character names are also recognized from resource filenames, mesh names,
    and parent object names when full paths are unavailable, for example
@@ -42,10 +47,13 @@ This companion script reads EMV's cached material values and adds an
    made before EMV captured its original values cannot be distinguished.
 4. Load your target mod ZIP or CMD into Color Sync, select the active color,
    and open **Import Freecam Colors** in section 2. Paste the string, preview
-   the changes, and click **Apply to Active CMD**.
-5. Export your CMD or mod ZIP normally. **Undo Last Import** restores the exact
-   pre-import buffer, including enable flags and earlier edits. It is available
-   only while that CMD has no later changes.
+   the changes, and click **Apply Colors**. Inactive Color 1 defaults update the
+   actual material files in the loaded mod ZIP, preserving inactive CMD overrides.
+   Review the shared palette and component scope shown in the preview.
+5. Export your CMD or mod ZIP normally. Material-default edits require their
+   material files; use the full mod ZIP for shared bundle components.
+   **Undo Last Import** restores the exact pre-import CMD and affected material
+   bytes, including earlier edits. Later changes to those files make undo unavailable.
 
 If clipboard copy fails, copy the text box with Ctrl+A / Ctrl+C. Alternatively,
 click **Save color export JSON** and import
@@ -60,12 +68,14 @@ click **Save color export JSON** and import
 - RGBA vectors between 0 and 1, exported as original runtime floats.
 - RGB converts from linear runtime values directly into sRGB CMD bytes, with
   rounding only at the final byte write. Alpha is scaled directly to 0–255.
-- Matching target slots are enabled when their enable field is writable.
-- Imports that would activate inactive Color 1 defaults are blocked before
-  applying any changes. Load the complete mod ZIP and use its direct color
-  editor or sync controls for those defaults.
-- Choose any loaded CMD as the target. Import modifies only that active CMD,
-  matching exact material names and supported color parameter names. The exporter does
+- Matching ordinary CMD target slots are enabled when their enable field is writable.
+- Inactive Color 1 defaults use existing RGB/RGBA MDF properties in the complete
+  mod ZIP. Runtime floats are stored directly at float32 precision, with no CMD
+  byte quantization. RGB-only properties require alpha 1. Missing or unsupported
+  targets appear as skipped entries in the preview.
+- Choose any loaded CMD as the target. Import matches its exact material names
+  and supported color parameter names. Shared MDF edits can affect other palettes
+  and explicitly linked variants; that scope is shown before applying. The exporter does
   not detect the source palette, and the browser ignores palette metadata in
   older exports.
 - Missing materials/slots, ambiguous CMD material names and conflicting
@@ -79,7 +89,7 @@ click **Save color export JSON** and import
 
 Color Sync's **Export Colors as String** panel uses this same format. It exports
 all active supported slots from the selected working CMD, including applied
-edits. Inactive slots are omitted because matching imported slots become active.
+edits. Inactive slots and material defaults are omitted from this CMD-only string export.
 CMD bytes are decoded to full-precision linear floats so re-importing preserves
 RGB and alpha bytes exactly. No REFramework installation is needed for this
 browser-to-browser transfer.
@@ -129,6 +139,10 @@ object names too. Checks cover every mapped character, unknown IDs, and names
 without costume information.
 Version 1.5 removes named hair shader color exports and controls while retaining
 player/costume identification and ordinary CustomizeColor transfers.
+Version 1.6 shows only edited characters, automatically selects a single edited
+character, and groups reused costume parts under the owning body costume.
+Automated cache tests cover the A.K.I. C1/C6 grouping case and independent actors.
+The new exporter behavior still needs in-game confirmation.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).

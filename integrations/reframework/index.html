@@ -15,30 +15,30 @@
     <section class="panel">
         <h1>Bring your in-game colors into Color Sync</h1>
         <p>Edit colors live with EMV / Lua Freecam, then transfer the edited slots with one copy and paste.</p>
-        <p><a class="secondary-button" href="./SF6-Color-Sync-REFramework-v1.5.zip">Download exporter v1.5</a> · <a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Nexus Mods page</a></p>
+        <p><a class="secondary-button" href="./SF6-Color-Sync-REFramework-v1.6.zip">Download exporter v1.6</a> · <a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files" target="_blank" rel="noopener">Nexus Mods page</a></p>
         <p>If EMV Engine and Lua Freecam are not set up yet, follow the <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a>. Keep REFramework installed.</p>
         <h2>Once EMV and Freecam are ready</h2>
         <ol>
-            <li><strong>Enable the exporter.</strong> Place its ZIP in Fluffy Mod Manager’s <code>Games/SF6/Mods</code> folder. Refresh the mod list, enable <strong>SF6 Color Sync - Freecam Exporter</strong>, then start SF6.</li>
-            <li><strong>Edit and copy.</strong> Open the character’s Materials editor before editing colors in EMV / Freecam. Under REFramework’s Script Generated UI, open <strong>SF6 Color Sync</strong>, click <strong>Refresh characters</strong>, select your character, and click <strong>Copy for Color Sync</strong>.</li>
-            <li><strong>Paste and save.</strong> Load your target mod ZIP or CMD in Color Sync and choose the active color you want to update. In section 2, open <strong>Import Freecam Colors</strong>, paste, preview, and apply. Export your CMD or mod ZIP to save the edits.</li>
+            <li><strong>Enable the exporter.</strong> Place its ZIP in Fluffy Mod Manager’s <code>Games/SF6/Mods</code> folder. Refresh the mod list, disable the older exporter entry, enable v1.6, then restart SF6.</li>
+            <li><strong>Edit and copy.</strong> Open Materials before editing in EMV / Freecam. Under REFramework’s Script Generated UI, open <strong>SF6 Color Sync</strong>. A single edited character is selected automatically. When several characters have edits, choose the one to export, then click <strong>Copy for Color Sync</strong>.</li>
+            <li><strong>Paste and save.</strong> Load your target mod ZIP or CMD in Color Sync and choose the active color you want to update. In section 2, open <strong>Import Freecam Colors</strong>, paste, preview, and click <strong>Apply Colors</strong>. Save the complete mod ZIP when importing shared material defaults.</li>
         </ol>
         <figure class="screenshot-slot freecam-setup-screenshot">
             <img src="../../data/feature-guide/freecam-exporter-setup.webp" width="1280" height="1175" loading="lazy" decoding="async" alt="SF6 Color Sync panel in REFramework showing Refresh characters, the Character / mesh selector, Copy for Color Sync, and a generated export string.">
-            <figcaption>In REFramework, open <strong>SF6 Color Sync</strong>, refresh the character list, select your character or mesh, then click <strong>Copy for Color Sync</strong>. Click the screenshot to enlarge it.</figcaption>
+            <figcaption>Earlier exporter view showing where to find <strong>SF6 Color Sync</strong> and <strong>Copy for Color Sync</strong>. In v1.6, a single edited character is selected automatically. Click the screenshot to enlarge it.</figcaption>
         </figure>
     </section>
     <section class="panel">
         <h2>Supported colors</h2>
-        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Runtime RGB values convert automatically to visual CMD colors. Matching supported slots become active. Named hair shader colors are omitted.</p>
+        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Ordinary CMD slots receive the matching visual colors. Inactive Color 1 defaults update the actual material files while keeping CMD overrides inactive. Named hair shader colors are omitted.</p>
         <p>Choose any loaded CMD as your target. Import updates its matching material and color names. Unchanged colors and other shader settings are omitted. Missing or ambiguous matches appear in the preview.</p>
-        <p>For inactive Color 1 defaults, load the complete mod ZIP and use Color Sync’s direct editor or sync controls. Freecam imports that would activate those defaults are blocked before applying changes.</p>
+        <p>For inactive Color 1 defaults, load the complete mod ZIP. The import preview shows the palettes and variants sharing those defaults, and the full ZIP export includes all required material edits.</p>
         <p>Open each mesh’s Materials editor that you want to include, including separate hair/head meshes. Copy scans the selected character’s current cache, including meshes opened since the last refresh. When character grouping is unavailable, refresh after opening another mesh, then select and export each mesh separately. Open EMV before editing so it can capture the original colors.</p>
-        <p>The selector shows character names, players, and costumes, for example <strong>P1 - Ingrid C2 (8 cached meshes)</strong>. Names such as <code>esf032</code> appear as <strong>Ingrid</strong> even when costume information is unavailable. Open both players’ Materials and refresh to list both. Copy exports only the selected entry’s edits. Unknown costumes are labeled as unknown, and unidentified players include a unique object identifier.</p>
+        <p>Only characters with edited supported colors appear. Reused parts from another costume stay with the owning character’s body costume. A selector appears when several characters have edits; labels identify the player, character, and costume, such as <strong>P1 - Ingrid C2</strong>. Unknown costumes remain labeled as unknown, and unidentified actors include a unique object identifier.</p>
         <h2>Clipboard and undo</h2>
         <p>To share colors from a loaded CMD, use <strong>Export Colors as String</strong> in section 2 of Color Sync. Generate or copy the active CMD’s current colors, including applied edits, then paste into <strong>Import Freecam Colors</strong> for your chosen target. Inactive slots are omitted.</p>
         <p>If copying fails, use Ctrl+A / Ctrl+C in the exporter’s text box, or save its JSON file and use <strong>Load Export JSON</strong>. The file is saved to <code>reframework/data/SF6ColorSync/colors.sf6freecam.json</code>.</p>
-        <p><strong>Undo Last Import</strong> restores the pre-import CMD, including earlier edits and active states. Later CMD changes make that undo unavailable.</p>
+        <p><strong>Undo Last Import</strong> restores the pre-import CMD and affected material defaults, preserving earlier edits. Later changes to those files make that undo unavailable.</p>
         <p><a href="./README.md">Technical format and validation details</a></p>
     </section>
 </main>

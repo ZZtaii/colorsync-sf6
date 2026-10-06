@@ -96,24 +96,29 @@ only. A loose Color 1 CMD needs the full mod ZIP for inactive default edits.
 Use the full mod ZIP for shared defaults across bundle components. A single-mod
 colors-only ZIP can also carry its material edits. A CMD-only export cannot
 carry the material files. Current Changes, revert, saved color states,
-and color backups include material default edits. Palette duplication and
-Freecam imports that would activate an inactive default require the direct
-color editor or sync workflow instead.
+and color backups include material default edits. Freecam imports use the same
+safe material-default route and preserve their runtime float values. Palette
+duplication that would activate an inactive default requires the direct color
+editor or sync workflow instead.
 
 ## EMV / Lua Freecam color import
 
-Get the current [exporter v1.5 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.5.zip).
+Get the current [exporter v1.6 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.6.zip).
 For EMV Engine and Lua Freecam setup, follow the
 [setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
 Once both are ready, enable the exporter ZIP in Fluffy Mod Manager.
 For manual installation, place the [Lua exporter](integrations/reframework/SF6%20Color%20Sync.lua)
 in your game's `reframework/autorun` folder. Open Materials before editing colors,
 open REFramework's **SF6 Color Sync** panel, and click **Copy for Color Sync**.
+Only characters with edited supported colors appear. A single edited character
+is selected automatically; choose one when multiple characters have edits.
+Reused costume parts stay with their owning character's body costume.
 In section 2 of the browser editor, use **Import Freecam Colors** to paste,
 preview, and apply the supported slots to the active CMD of your choice.
 Material names and CustomizeColor indexes determine matches. Named shader
-colors are omitted. Inactive Color 1 defaults need the complete mod ZIP and
-the direct color editor or sync workflow. Export normally.
+colors are omitted. Inactive Color 1 defaults need the complete mod ZIP; the
+preview shows their shared scope, and import updates their material files
+without activating CMD overrides. Export the full mod ZIP for shared components.
 See the [setup and format guide](integrations/reframework/README.md).
 
 ## Copyable color exports

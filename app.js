@@ -58,7 +58,7 @@ import {
     summarizeSf6ColorClusters,
 } from "./lib/sf6-colors.js";
 import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
-import { discoverMaterialDefaultTargets, writeMaterialDefaultColor } from "./lib/material-default-edits.js";
+import { discoverMaterialDefaultTargets, writeMaterialDefaultColor, writeMaterialDefaultLinearColor } from "./lib/material-default-edits.js";
 import {
     loadDefaultMdfColorMaterials,
     mergeMdfColorMaterials,
@@ -3666,6 +3666,7 @@ function buildColorStateDocument() {
             targets: change.editTargets.map(target => ({
                 sourcePath: target.sourcePath, materialIndex: target.materialIndex,
                 originalLinearRgba: originalMaterialDefaultColor(target, change.slotIndex).linearRgba.slice(),
+                linearRgba: target.customizeColors.find(color => color.index === change.slotIndex).linearRgba.slice(),
             })),
         })),
         commands: state.cmdEntries.map(cmd => ({
@@ -3800,7 +3801,7 @@ function validateColorStateDocument(document) {
 
 function applyColorStateDocument(document) {
     const operations = validateColorStateDocument(document);
-    const defaultPlans = validateMaterialDefaultState(document);
+    const defaultState = validateMaterialDefaultState(document);
     let changedSlots = 0;
 
     for (const { cmd, slot, rgba, enabled } of operations) {
@@ -3826,11 +3827,12 @@ function applyColorStateDocument(document) {
         }
     }
 
-    revertMaterialDefaults();
-    for (const plan of defaultPlans) {
-        applyColorSlotEdit(planColorSlotEdit(plan.cmd, plan.slot, plan.rgba));
-        changedSlots += 1;
+    for (const [path, record] of state.materialDefaultBuffers) {
+        record.workingBuffer = defaultState.materialBuffers.get(path) || record.originalBuffer.slice(0);
     }
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
+    changedSlots += defaultState.slotCount;
 
     state.surpriseSnapshots.clear();
     state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(cmd => (
@@ -3845,10 +3847,11 @@ function applyColorStateDocument(document) {
 }
 
 function validateMaterialDefaultState(document) {
-    if (document.version === 1) return [];
+    const materialBuffers = new Map();
+    if (document.version === 1) return { materialBuffers, slotCount: 0 };
     if (!Array.isArray(document.materialDefaults)) throw new Error("The color state is missing its material defaults.");
     const seen = new Set();
-    return document.materialDefaults.map(saved => {
+    for (const saved of document.materialDefaults) {
         if (typeof saved?.material !== "string" || !Number.isInteger(saved.slotIndex) || saved.slotIndex < 0
             || !Array.isArray(saved.rgba) || saved.rgba.length !== 4
             || saved.rgba.some(value => !Number.isInteger(value) || value < 0 || value > 255)
@@ -3858,7 +3861,6 @@ function validateMaterialDefaultState(document) {
         const key = JSON.stringify([saved.material, saved.slotIndex, saved.targets.map(target => [target.sourcePath, target.materialIndex]).sort()]);
         if (seen.has(key)) throw new Error("The color state contains a duplicate material default.");
         seen.add(key);
-        const targets = [];
         const seenPaths = new Set();
         for (const savedTarget of saved.targets) {
             const target = state.materialDefaultTargets.find(target => (
@@ -3875,14 +3877,17 @@ function validateMaterialDefaultState(document) {
             const propertyKey = JSON.stringify([target.sourcePath, target.materialIndex, saved.slotIndex]);
             if (seen.has(propertyKey)) throw new Error("The color state contains overlapping material defaults.");
             seen.add(propertyKey);
-            targets.push(target);
+            const record = state.materialDefaultBuffers.get(target.sourcePath);
+            const buffer = materialBuffers.get(target.sourcePath) || record.originalBuffer;
+            const patch = savedTarget.linearRgba === undefined
+                ? writeMaterialDefaultColor(buffer, zipEntryBaseName(target.sourcePath), target.name, saved.slotIndex, saved.rgba,
+                    { materialIndex: target.materialIndex })
+                : writeMaterialDefaultLinearColor(buffer, zipEntryBaseName(target.sourcePath), target.name, saved.slotIndex, savedTarget.linearRgba,
+                    { materialIndex: target.materialIndex });
+            materialBuffers.set(target.sourcePath, patch.buffer);
         }
-        const cmd = state.cmdEntries[0];
-        const slot = { index: saved.slotIndex, materialName: saved.material,
-            materialDefaultTargets: targets, color: { absoluteOffset: 0 } };
-        planColorSlotEdit(cmd, slot, saved.rgba);
-        return { cmd, slot, rgba: saved.rgba.slice() };
-    });
+    }
+    return { materialBuffers, slotCount: document.materialDefaults.length };
 }
 
 async function loadColorStateFile(file) {
@@ -3933,20 +3938,106 @@ function freecamColorCell(rgba, enabled = true) {
     return cell;
 }
 
+function prepareFreecamColorImport(documentData, cmd) {
+    const sourcePlan = planFreecamColorImport(documentData, cmd);
+    const issues = sourcePlan.issues.slice();
+    const operations = [];
+    for (const operation of sourcePlan.operations) {
+        try {
+            if (operation.slot.materialEditBlockedReason) throw new Error(operation.slot.materialEditBlockedReason);
+            if (!operation.slot.materialDefaultTargets?.length) {
+                planColorSlotEdit(cmd, operation.slot, operation.rgba);
+                operations.push({ ...operation, route: "cmd" });
+                continue;
+            }
+            const defaultWrites = operation.slot.materialDefaultTargets.map(target => {
+                const record = state.materialDefaultBuffers.get(target.sourcePath);
+                if (!record) throw new Error("Load the complete mod ZIP to edit this shared material default.");
+                return { target, ...writeMaterialDefaultLinearColor(record.workingBuffer,
+                    zipEntryBaseName(target.sourcePath), target.name, operation.slotIndex, operation.linearRgba,
+                    { materialIndex: target.materialIndex }) };
+            });
+            operations.push({ ...operation, route: "default", defaultWrites, rgba: defaultWrites[0].rgba,
+                beforeRgba: slotRgba(operation.slot), beforeEnabled: false,
+                changed: defaultWrites.some(write => write.changed),
+            });
+        } catch (error) {
+            issues.push({ ...operation, reason: error.message || String(error) });
+        }
+    }
+    const conflicts = new Set();
+    const defaultOperations = operations.filter(operation => operation.route === "default");
+    for (let i = 0; i < defaultOperations.length; i += 1) for (let j = i + 1; j < defaultOperations.length; j += 1) {
+        const left = defaultOperations[i];
+        const right = defaultOperations[j];
+        for (const a of left.defaultWrites) for (const b of right.defaultWrites) {
+            if (a.target.sourcePath !== b.target.sourcePath) continue;
+            const start = Math.max(a.dataOffset, b.dataOffset);
+            const end = Math.min(a.dataOffset + a.componentCount * 4, b.dataOffset + b.componentCount * 4);
+            if (start >= end) continue;
+            const aBytes = new Uint8Array(a.buffer, start, end - start);
+            const bBytes = new Uint8Array(b.buffer, start, end - start);
+            if (aBytes.some((value, index) => value !== bBytes[index])) { conflicts.add(left); conflicts.add(right); }
+        }
+    }
+    for (const operation of conflicts) issues.push({ ...operation, reason: "Conflicting imported colors overlap the same material default." });
+    const supported = operations.filter(operation => !conflicts.has(operation));
+    const cmdBuffer = cmd.workingBuffer.slice(0);
+    const materialBuffers = new Map();
+    const materialBeforeBuffers = new Map();
+    for (const operation of supported) {
+        if (operation.route === "default") {
+            for (const write of operation.defaultWrites) {
+                const { target } = write;
+                const record = state.materialDefaultBuffers.get(target.sourcePath);
+                if (!materialBeforeBuffers.has(target.sourcePath)) materialBeforeBuffers.set(target.sourcePath, record.workingBuffer.slice(0));
+                if (!operation.changed) continue;
+                const buffer = materialBuffers.get(target.sourcePath) || record.workingBuffer;
+                materialBuffers.set(target.sourcePath, writeMaterialDefaultLinearColor(buffer,
+                    zipEntryBaseName(target.sourcePath), target.name, operation.slotIndex, operation.linearRgba,
+                    { materialIndex: target.materialIndex }).buffer);
+            }
+        } else if (operation.changed) {
+            writeRgbaAtOffset(cmdBuffer, operation.slot.color.absoluteOffset, operation.rgba);
+            if (operation.slot.enable) {
+                const enabled = writeEnableAtOffset(cmdBuffer, operation.slot.enable.absoluteOffset,
+                    operation.slot.enable.byteLength ?? 1, true);
+                if (!enabled) throw new Error("The CMD active-state field could not be updated safely.");
+            }
+        }
+    }
+    return { operations: supported, issues, duplicates: sourcePlan.duplicates, cmdBuffer, materialBuffers, materialBeforeBuffers };
+}
+
+function materialBuffersMatch(snapshot) {
+    return [...snapshot].every(([path, buffer]) => {
+        const record = state.materialDefaultBuffers.get(path);
+        return record && !diffBuffers(buffer, record.workingBuffer).length;
+    });
+}
+
+function freecamRouteSignature(plan) {
+    return JSON.stringify(plan.operations.map(operation => [operation.material, operation.parameter, operation.route,
+        operation.defaultWrites?.map(write => [write.target.sourcePath, write.target.materialIndex]) || []]));
+}
+
 function previewFreecamColors() {
     resetFreecamPreview();
     const documentData = parseFreecamColorTransfer(freecamInput.value);
     const cmd = state.cmdEntries[state.activeCmdIndex];
-    const plan = planFreecamColorImport(documentData, cmd);
-    freecamImport = { documentData, cmd, plan, clusters: cmd.colorClusters, beforeBuffer: cmd.workingBuffer.slice(0), text: freecamInput.value };
+    const plan = prepareFreecamColorImport(documentData, cmd);
+    freecamImport = { documentData, cmd, plan, importedMod: state.importedMod,
+        clusters: cmd.colorClusters, beforeBuffer: cmd.workingBuffer.slice(0), text: freecamInput.value };
     const title = document.createElement("p");
     title.className = "freecam-preview-heading";
-    title.textContent = `Apply to ${cmdDisplayName(cmd)} only.`
+    title.textContent = `Import matching colors for ${cmdDisplayName(cmd)}.`
         + (documentData.source.object ? ` Source: ${documentData.source.object}.` : "");
     freecamPreview.append(title);
     const changed = plan.operations.filter(operation => operation.changed);
     const summary = document.createElement("p");
-    summary.textContent = `${changed.length} slot${changed.length === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
+    const defaults = changed.filter(operation => operation.route === "default").length;
+    const cmdColors = changed.length - defaults;
+    summary.textContent = `${cmdColors} CMD color${cmdColors === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
         + (plan.duplicates ? ` ${plan.duplicates} identical mesh duplicates combined.` : "")
         + (documentData.skippedFields ? ` The export omitted ${documentData.skippedFields} unsupported or out-of-range fields.` : "");
     freecamPreview.append(summary);
@@ -3957,7 +4048,7 @@ function previewFreecamColors() {
         table.className = "freecam-preview-table";
         const head = document.createElement("thead");
         const headings = document.createElement("tr");
-        for (const label of ["Material / slot", "Current CMD", "Imported CMD color"]) {
+        for (const label of ["Material / slot", "Current color", "Imported color", "Destination"]) {
             const cell = document.createElement("th");
             cell.scope = "col";
             cell.textContent = label;
@@ -3967,9 +4058,20 @@ function previewFreecamColors() {
         const body = document.createElement("tbody");
         for (const operation of changed) {
             const row = document.createElement("tr");
+            row.dataset.freecamRoute = operation.route;
             const name = document.createElement("td");
             name.textContent = `${operation.material} / ${operation.parameter}`;
             row.append(name, freecamColorCell(operation.beforeRgba, operation.beforeEnabled), freecamColorCell(operation.rgba));
+            const destination = document.createElement("td");
+            destination.textContent = operation.route === "default" ? "Shared material default" : cmdDisplayName(cmd);
+            if (operation.route === "default") {
+                const scope = document.createElement("p");
+                scope.className = "material-default-scope";
+                scope.textContent = materialDefaultScopeText(operation.material, operation.slotIndex,
+                    operation.defaultWrites.map(write => write.target));
+                destination.appendChild(scope);
+            }
+            row.appendChild(destination);
             body.append(row);
         }
         table.append(head, body);
@@ -3990,7 +4092,10 @@ function previewFreecamColors() {
         freecamPreview.append(details);
     }
     showStatus(freecamStatus, plan.issues.length ? "warn" : "good",
-        changed.length ? "Preview ready. Imported slots will be active after applying." : "No matching colors need to change.");
+        changed.length ? (defaults
+            ? "Preview ready. Shared defaults keep their CMD slots inactive and need a mod ZIP; CMD colors update the selected palette."
+            : "Preview ready. Imported CMD slots will be active after applying.")
+            : (plan.issues.length ? "No supported colors can be applied. Review the skipped matches." : "No matching colors need to change."));
     updateFreecamButtons();
 }
 
@@ -4006,45 +4111,64 @@ function applyFreecamColors() {
     const pending = freecamImport;
     const cmd = state.cmdEntries[state.activeCmdIndex];
     if (!pending || pending.cmd !== cmd || pending.text !== freecamInput.value) throw new Error("Preview this export for the active CMD first.");
-    if (pending.clusters !== cmd.colorClusters || diffBuffers(pending.beforeBuffer, cmd.workingBuffer).length) {
+    if (pending.importedMod !== state.importedMod || pending.clusters !== cmd.colorClusters
+        || diffBuffers(pending.beforeBuffer, cmd.workingBuffer).length || !materialBuffersMatch(pending.plan.materialBeforeBuffers)) {
         previewFreecamColors();
-        showStatus(freecamStatus, "warn", "The CMD changed since the preview. Review the updated preview, then apply again.");
+        showStatus(freecamStatus, "warn", "Colors changed since the preview. Review the updated preview, then apply again.");
         return;
     }
-    const plan = planFreecamColorImport(pending.documentData, cmd);
+    const plan = prepareFreecamColorImport(pending.documentData, cmd);
+    if (freecamRouteSignature(plan) !== freecamRouteSignature(pending.plan)) {
+        previewFreecamColors();
+        showStatus(freecamStatus, "warn", "The matching material files changed. Review the updated preview, then apply again.");
+        return;
+    }
     const operations = plan.operations.filter(operation => operation.changed);
     if (!operations.length) throw new Error("No matching colors need to change.");
-    for (const operation of operations) {
-        if (operation.slot.materialDefaultTargets?.length) {
-            throw new Error("Freecam import cannot enable a shared material default. Edit these slots directly, or use Color Sync, then save a mod ZIP.");
-        }
-        planColorSlotEdit(cmd, operation.slot, operation.rgba);
-    }
     const beforeBuffer = cmd.workingBuffer.slice(0);
+    const beforeMaterialBuffers = new Map([...plan.materialBuffers].map(([path]) => [path, state.materialDefaultBuffers.get(path).workingBuffer.slice(0)]));
+    cmd.workingBuffer = plan.cmdBuffer;
+    for (const [path, buffer] of plan.materialBuffers) state.materialDefaultBuffers.get(path).workingBuffer = buffer;
     for (const operation of operations) {
-        setCmdColorParameter(cmd, operation.material, operation.parameter, operation.rgba);
-        removeSurpriseSnapshotSlot(cmd, operation.slot.color.absoluteOffset);
+        if (operation.route === "cmd") {
+            updateColorModelAtOffset(cmd, operation.slot.color.absoluteOffset, operation.rgba);
+            const enabled = enabledAtOffset(cmd.workingBuffer, operation.slot.enable?.absoluteOffset, operation.slot.enable?.byteLength);
+            if (enabled !== null) { operation.slot.enabled = enabled; operation.slot.enable.value = enabled; }
+            removeSurpriseSnapshotSlot(cmd, operation.slot.color.absoluteOffset);
+        }
     }
-    freecamUndo = { cmd, clusters: cmd.colorClusters, beforeBuffer, afterBuffer: cmd.workingBuffer.slice(0), slots: operations.map(operation => operation.slot), wasDirty: state.inspectorDirty };
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
+    freecamUndo = { cmd, importedMod: state.importedMod, clusters: cmd.colorClusters, beforeBuffer, afterBuffer: cmd.workingBuffer.slice(0),
+        beforeMaterialBuffers, afterMaterialBuffers: new Map([...plan.materialBuffers].map(([path, buffer]) => [path, buffer.slice(0)])),
+        slots: operations.filter(operation => operation.route === "cmd").map(operation => operation.slot) };
     state.inspectorDirty = true;
     resetFreecamPreview();
     refreshAfterFreecamImport();
-    showStatus(freecamStatus, "good", `Applied ${operations.length} color slot${operations.length === 1 ? "" : "s"} to ${cmdDisplayName(cmd)}. Export the CMD or mod ZIP to save them.`);
+    const defaults = operations.filter(operation => operation.route === "default").length;
+    const cmdColors = operations.length - defaults;
+    showStatus(freecamStatus, "good", `Applied ${cmdColors} CMD color${cmdColors === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"}. `
+        + (defaults ? "Build a mod ZIP to save the material defaults." : "Export the CMD or mod ZIP to save them.")
+        + (plan.issues.length ? ` ${plan.issues.length} unsupported match${plan.issues.length === 1 ? " was" : "es were"} skipped.` : ""));
 }
 
 function undoFreecamColors() {
     const undo = freecamUndo;
     if (!undo || undo.cmd !== state.cmdEntries[state.activeCmdIndex]) return;
-    if (undo.clusters !== undo.cmd.colorClusters || diffBuffers(undo.afterBuffer, undo.cmd.workingBuffer).length) {
+    if (undo.importedMod !== state.importedMod || undo.clusters !== undo.cmd.colorClusters
+        || diffBuffers(undo.afterBuffer, undo.cmd.workingBuffer).length || !materialBuffersMatch(undo.afterMaterialBuffers)) {
         throw new Error("Colors changed after this import. Undo is unavailable to preserve your later edits; use Current Changes to revert individual colors.");
     }
     new Uint8Array(undo.cmd.workingBuffer).set(new Uint8Array(undo.beforeBuffer));
+    for (const [path, buffer] of undo.beforeMaterialBuffers) state.materialDefaultBuffers.get(path).workingBuffer = buffer.slice(0);
     for (const slot of undo.slots) {
         updateColorModelAtOffset(undo.cmd, slot.color.absoluteOffset, rgbaAtOffset(undo.beforeBuffer, slot.color.absoluteOffset));
         const enabled = enabledAtOffset(undo.beforeBuffer, slot.enable?.absoluteOffset, slot.enable?.byteLength);
         if (enabled !== null) { slot.enabled = enabled; slot.enable.value = enabled; }
     }
-    state.inspectorDirty = undo.wasDirty;
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
+    recomputeInspectorDirty();
     freecamUndo = null;
     resetFreecamPreview();
     refreshAfterFreecamImport();
