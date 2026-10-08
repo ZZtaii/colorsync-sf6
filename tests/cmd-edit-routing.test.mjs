@@ -6,6 +6,7 @@ import { cmdColorSlots } from "../lib/sf6-shader-colors.js";
 import { parseMdfMaterialNames } from "../lib/mdf-materials.js";
 import { discoverMaterialDefaultTargets, writeMaterialDefaultColor } from "../lib/material-default-edits.js";
 import { makeMdf } from "./fixtures/mdf.mjs";
+import { mergeMdfColorMaterials } from "../lib/default-mdf-materials.js";
 
 // Exercise the app's actual routing and mutation functions without its DOM or
 // private game assets. Top-level function closing braces start in column zero.
@@ -17,16 +18,19 @@ const names = [
     "updateColorModelAtOffset", "forceEnableSlot", "rgbaToHexString", "clampByte", "rgbaEquals",
     "getMaterial", "getColorSlot", "setCmdColorSlot", "isStandardDefaultPalette",
     "preservesDefaultCmdStructure", "rawSlotEnabled", "buildPaletteDuplicatePlan", "rgbaAtOffset",
+    "refreshDiscoveredCustomMaterials", "discoverMdfColorMaterials", "attachMdfFallbackColorsToCmdEntries",
+    "applyCustomMappingsToCmdEntry",
 ];
 const functions = names.map(name => {
-    const start = app.indexOf(`function ${name}(`);
+    let start = app.indexOf(`function ${name}(`);
     assert.ok(start >= 0, `Missing production function ${name}`);
+    if (app.slice(start - 6, start) === "async ") start -= 6;
     return app.slice(start, app.indexOf("\n}", start) + 2);
 }).join("\n");
 const mdfPath = "natives/STM/Product/Model/esf/esf900/001/esf900_001_00.mdf2.40";
 const rgba = [22, 28, 50, 255];
 
-function fixture({ entries = null, palette = 1, variant = "standard", duplicateBody = false } = {}) {
+function fixture({ entries = null, palette = 1, variant = "standard", duplicateBody = false, loadDefaults = async () => [] } = {}) {
     const originalBuffer = new ArrayBuffer(48);
     new Uint8Array(originalBuffer).fill(0xAD);
     const clusters = [
@@ -54,15 +58,20 @@ function fixture({ entries = null, palette = 1, variant = "standard", duplicateB
     };
     const state = {
         cmdEntries: [cmd], materialDefaultTargets: [], materialDefaultBuffers: new Map(),
+        customMdfMaterials: [], customMaterialMappings: [],
         importedMod: entries ? { entries, selectedRoot: "" } : null,
     };
+    const preparation = [];
     const api = runInNewContext(`${functions}\n({${names.join(",")}})`, {
         state, cmdColorSlots, parseMdfMaterialNames, discoverMaterialDefaultTargets, writeMaterialDefaultColor,
+        mergeMdfColorMaterials, loadDefaultMdfColorMaterials: loadDefaults,
+        setColorEditorPreparing: value => preparation.push(value),
+        renderColorClusters: () => {}, renderSyncPanels: () => {},
         zipEntryBaseName: path => path.split("/").at(-1),
     });
     api.refreshMaterialDefaultTargets();
     api.attachMaterialDefaultEditMetadata();
-    return { api, state, cmd, body: colorClusters[0].colors[0], head: colorClusters[1].colors[0] };
+    return { api, state, cmd, preparation, body: colorClusters[0].colors[0], head: colorClusters[1].colors[0] };
 }
 
 const materialEntries = (materials = [{ name: "esf_Body", colors: [{ index: 0, values: [0.5, 0.5, 0.5, 1] }] }]) => ({
@@ -125,6 +134,28 @@ test("a mod body MDF does not restrict ordinary stock head edits", () => {
     assert.deepEqual(Array.from(new Uint8Array(cmd.workingBuffer, 20, 4)), rgba);
 });
 
+test("actual MDF routes are ready before a delayed bundled-default lookup completes", async () => {
+    let finishLookup;
+    const lookup = new Promise(resolve => { finishLookup = resolve; });
+    const { api, state, cmd, body, preparation } = fixture({ entries: materialEntries(), loadDefaults: () => lookup });
+    // Reproduce a newly parsed CMD whose default-edit metadata is not attached yet.
+    delete body.materialDefaultTargets;
+    delete body.materialDefaultOriginalRgba;
+    state.materialDefaultTargets = [];
+    const refreshing = api.refreshDiscoveredCustomMaterials();
+    assert.deepEqual(preparation, [true]);
+    assert.equal(api.planColorSlotEdit(cmd, body, rgba).kind, "default");
+    api.setCmdColorSlot(cmd, "esf_Body", 0, rgba);
+    assert.deepEqual(cmd.workingBuffer, cmd.originalBuffer);
+    assert.equal(body.enabled, false);
+    const patched = state.materialDefaultBuffers.get(mdfPath).workingBuffer;
+    assert.deepEqual(parseMdfMaterialNames(patched, mdfPath)[0].customizeColors[0].cmdRgba, rgba);
+    finishLookup([]);
+    await refreshing;
+    assert.deepEqual(preparation, [true, false]);
+    assert.deepEqual(cmd.workingBuffer, cmd.originalBuffer);
+});
+
 test("missing, ambiguous and unsupported actual mod targets remain read only", () => {
     for (const options of [
         { entries: materialEntries([{ name: "Custom_Body", colors: [{ index: 0, values: [1, 1, 1, 1] }] }]) },
@@ -158,6 +189,16 @@ test("Color 1 graph preservation follows supplied mod MDFs, not the palette numb
     }
     const { api, cmd } = fixture({ entries: materialEntries() });
     assert.equal(api.preservesDefaultCmdStructure(cmd), true);
+});
+
+test("supplied MDFs protect Color 1 from saved graph mappings before CMD registration", () => {
+    const { api, state, cmd } = fixture({ entries: materialEntries() });
+    state.cmdEntries = [];
+    state.materialDefaultTargets = [];
+    api.refreshMaterialDefaultTargets(cmd.metadata);
+    assert.equal(api.preservesDefaultCmdStructure(cmd), true);
+    assert.equal(api.applyCustomMappingsToCmdEntry(cmd, [{ name: "Custom_Body", templateName: "esf_Body", customizeColorIndexes: [0] }]), cmd);
+    assert.deepEqual(cmd.workingBuffer, cmd.originalBuffer);
 });
 
 test("palette duplication can plan loose Color 1 targets and retains ordinary CMD preflight", () => {

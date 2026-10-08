@@ -1629,6 +1629,14 @@ function resolveExternalCustomMaterialSources(libraryEntries, target) {
     return resolved;
 }
 
+function setColorEditorPreparing(preparing) {
+    for (const panel of [parserPanel, colorPanel, colorReplacePanel, currentChangesPanel, outputPanel]) {
+        if (!panel) continue;
+        panel.inert = preparing;
+        panel.setAttribute("aria-busy", String(preparing));
+    }
+}
+
 async function refreshDiscoveredCustomMaterials() {
     const cmdEntriesSnapshot = state.cmdEntries.slice();
     const importedModSnapshot = state.importedMod;
@@ -1637,57 +1645,64 @@ async function refreshDiscoveredCustomMaterials() {
         && state.cmdEntries.length === cmdEntriesSnapshot.length
         && state.cmdEntries.every((cmd, index) => cmd === cmdEntriesSnapshot[index])
     );
-    const target = state.cmdEntries[0]?.metadata;
-    refreshMaterialDefaultTargets();
-    const importedMaterials = discoverMdfColorMaterials(
-        materialDefaultEntries(),
-        target,
-    );
-    let defaultMaterials = [];
-    let fallbackWarning = "";
+    setColorEditorPreparing(true);
     try {
-        defaultMaterials = await loadDefaultMdfColorMaterials(target);
-    } catch (error) {
-        if (!refreshIsCurrent()) return null;
-        console.warn("Could not load bundled default MDF materials:", error);
-        fallbackWarning = " Bundled MDF defaults could not be loaded; some inactive slots may be missing.";
-    }
-    if (!refreshIsCurrent()) return null;
-    state.customMdfMaterials = mergeMdfColorMaterials(importedMaterials, defaultMaterials);
-    const customCmdEntries = state.cmdEntries.filter(cmd => !preservesDefaultCmdStructure(cmd));
-    for (const material of state.customMdfMaterials) {
-        if (!refreshIsCurrent()) return null;
-        const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
-        if (!customCmdEntries.length) continue;
-        const presentEverywhere = customCmdEntries.every(cmd => (
-            cmd.colorClusters.some(cluster => cluster.name === material.name)
-        ));
-        const completeEverywhere = customCmdEntries.every(cmd => (
-            cmd.colorClusters.some(cluster => (
-                cluster.name === material.name
-                && cluster.colors.length >= requiredCount
-            ))
-        ));
-        if (completeEverywhere) continue;
-        if (material.source === "default" && !presentEverywhere) continue;
-        const templateName = presentEverywhere
-            ? material.name
-            : automaticCustomMaterialTemplateName(material);
-        if (!templateName) {
-            throw new Error(`Cannot add MDF material ${material.name}: no compatible CMD color-slot structure exists in every palette.`);
-        }
-        await addDiscoveredCustomMaterial(
-            material.name,
-            templateName,
-            state.importedMod?.externalCustomMaterialSources?.[material.name],
+        const target = state.cmdEntries[0]?.metadata;
+        refreshMaterialDefaultTargets();
+        // Actual MDF routes must be attached before the first asynchronous lookup.
+        attachMaterialDefaultEditMetadata();
+        const importedMaterials = discoverMdfColorMaterials(
+            materialDefaultEntries(),
+            target,
         );
+        let defaultMaterials = [];
+        let fallbackWarning = "";
+        try {
+            defaultMaterials = await loadDefaultMdfColorMaterials(target);
+        } catch (error) {
+            if (!refreshIsCurrent()) return null;
+            console.warn("Could not load bundled default MDF materials:", error);
+            fallbackWarning = " Bundled MDF defaults could not be loaded; some inactive slots may be missing.";
+        }
+        if (!refreshIsCurrent()) return null;
+        state.customMdfMaterials = mergeMdfColorMaterials(importedMaterials, defaultMaterials);
+        const customCmdEntries = state.cmdEntries.filter(cmd => !preservesDefaultCmdStructure(cmd));
+        for (const material of state.customMdfMaterials) {
+            if (!refreshIsCurrent()) return null;
+            const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
+            if (!customCmdEntries.length) continue;
+            const presentEverywhere = customCmdEntries.every(cmd => (
+                cmd.colorClusters.some(cluster => cluster.name === material.name)
+            ));
+            const completeEverywhere = customCmdEntries.every(cmd => (
+                cmd.colorClusters.some(cluster => (
+                    cluster.name === material.name
+                    && cluster.colors.length >= requiredCount
+                ))
+            ));
+            if (completeEverywhere) continue;
+            if (material.source === "default" && !presentEverywhere) continue;
+            const templateName = presentEverywhere
+                ? material.name
+                : automaticCustomMaterialTemplateName(material);
+            if (!templateName) {
+                throw new Error(`Cannot add MDF material ${material.name}: no compatible CMD color-slot structure exists in every palette.`);
+            }
+            await addDiscoveredCustomMaterial(
+                material.name,
+                templateName,
+                state.importedMod?.externalCustomMaterialSources?.[material.name],
+            );
+        }
+        if (!refreshIsCurrent()) return null;
+        attachMdfFallbackColorsToCmdEntries();
+        state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? [];
+        renderColorClusters(state.colorClusters);
+        renderSyncPanels();
+        return { fallbackWarning };
+    } finally {
+        if (refreshIsCurrent()) setColorEditorPreparing(false);
     }
-    if (!refreshIsCurrent()) return null;
-    attachMdfFallbackColorsToCmdEntries();
-    state.colorClusters = state.cmdEntries[state.activeCmdIndex]?.colorClusters ?? [];
-    renderColorClusters(state.colorClusters);
-    renderSyncPanels();
-    return { fallbackWarning };
 }
 
 function attachMdfFallbackColorsToCmdEntries() {
@@ -1719,8 +1734,7 @@ function materialDefaultEntries() {
     return entries;
 }
 
-function refreshMaterialDefaultTargets() {
-    const target = state.cmdEntries[0]?.metadata;
+function refreshMaterialDefaultTargets(target = state.cmdEntries[0]?.metadata) {
     state.materialDefaultTargets = target && state.importedMod
         ? discoverMaterialDefaultTargets(materialDefaultEntries(), {
             selectedRoot: state.importedMod.selectedRoot,
@@ -2389,7 +2403,10 @@ async function handleFiles(fileCollection) {
 
     const newlyParsed = [];
     for (const entry of toAdd) {
-        newlyParsed.push(applyCustomMappingsToCmdEntry(await parseCmdEntry(entry)));
+        const cmd = await parseCmdEntry(entry);
+        // Resolve supplied MDFs before saved mappings can rebuild Color 1.
+        if (!state.materialDefaultTargets.length) refreshMaterialDefaultTargets(cmd.metadata);
+        newlyParsed.push(applyCustomMappingsToCmdEntry(cmd));
     }
 
     // Keep existing working buffers / edits; only append new CMDs.
@@ -2425,6 +2442,8 @@ async function handleFiles(fileCollection) {
     // Don't wipe dirty state for already-edited CMDs when appending.
     if (!hasExisting) state.inspectorDirty = false;
 
+    refreshMaterialDefaultTargets();
+    attachMaterialDefaultEditMetadata();
     resetSyncSelections();
     await loadReferenceImages();
 
