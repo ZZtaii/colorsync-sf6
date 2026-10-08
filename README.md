@@ -89,8 +89,12 @@ values; unrelated material properties and file structure are preserved.
 
 ### Material defaults and inactive slots
 
-Load the complete mod ZIP when editing an inactive Color 1 CustomizeColor slot.
-If its material file is available, the editor updates the material default and
+Loose CMDs and colors-only ZIPs use ordinary CMD editing: changing an inactive
+slot writes the color and activates its override, including Color 1. Bundled
+stock MDF data supplies displayed defaults and missing supported slots.
+
+Load the complete mod ZIP to edit its inactive Color 1 material defaults.
+When its matching material file is available, the editor updates the default and
 retains the inactive CMD override. Defaults are shared by palettes that do not
 override that slot; the editor shows that scope. Existing active palette colors
 continue to use their CMD values.
@@ -99,7 +103,8 @@ For component bundles, the editor also reads the material files from variants
 that explicitly depend on the selected Main files entry. Default edits update
 those matching variants together. Unrelated mod components remain untouched.
 Materials or color properties absent from the actual mod's MDF files are read
-only. A loose Color 1 CMD needs the full mod ZIP for inactive default edits.
+only within the model part supplied by that MDF. Parts without a supplied mod
+MDF retain ordinary CMD editing.
 
 Use the full mod ZIP for shared defaults across bundle components. A single-mod
 colors-only ZIP can also carry its material edits. A CMD-only export cannot
@@ -124,9 +129,10 @@ Reused costume parts stay with their owning character's body costume.
 In section 2 of the browser editor, use **Import Freecam Colors** to paste,
 preview, and apply the supported slots to the active CMD of your choice.
 Material names and CustomizeColor indexes determine matches. Named shader
-colors are omitted. Inactive Color 1 defaults need the complete mod ZIP; the
-preview shows their shared scope, and import updates their material files
-without activating CMD overrides. Export the full mod ZIP for shared components.
+colors are omitted. Loose CMDs and colors-only ZIPs import into CMD overrides.
+With matching mod MDF files loaded, inactive Color 1 defaults use those material
+files; the preview shows their shared scope and CMD overrides stay inactive.
+Export the full mod ZIP for shared components.
 See the [setup and format guide](integrations/reframework/README.md).
 
 ## Copyable color exports

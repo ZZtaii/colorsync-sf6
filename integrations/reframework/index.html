@@ -30,9 +30,9 @@
     </section>
     <section class="panel">
         <h2>Supported colors</h2>
-        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Ordinary CMD slots receive the matching visual colors. Inactive Color 1 defaults update the actual material files while keeping CMD overrides inactive. Named hair shader colors are omitted.</p>
+        <p>The exporter includes edited CustomizeColor RGBA vectors, including Change Multiple edits in EMV’s cached meshes. Loose CMDs and colors-only ZIPs receive matching visual colors and activate their targets. With matching mod MDF files loaded, inactive Color 1 defaults update those materials while keeping CMD overrides inactive. Named hair shader colors are omitted.</p>
         <p>Choose any loaded CMD as your target. Import updates its matching material and color names. Unchanged colors and other shader settings are omitted. Missing or ambiguous matches appear in the preview.</p>
-        <p>For inactive Color 1 defaults, load the complete mod ZIP. The import preview shows the palettes and variants sharing those defaults, and the full ZIP export includes all required material edits.</p>
+        <p>Load the complete mod ZIP to edit its shared Color 1 material defaults. The import preview shows the palettes and variants sharing those defaults, and the full ZIP export includes all required material edits.</p>
         <p>Open each mesh’s Materials editor that you want to include, including separate hair/head meshes. Copy scans the selected character’s current cache, including meshes opened since the last refresh. When character grouping is unavailable, refresh after opening another mesh, then select and export each mesh separately. Open EMV before editing so it can capture the original colors.</p>
         <p>Only characters with edited supported colors appear. Reused parts from another costume stay with the owning character’s body costume. A selector appears when several characters have edits; labels identify the player, character, and costume, such as <strong>P1 - Ingrid C2</strong>. Unknown costumes remain labeled as unknown, and unidentified actors include a unique object identifier.</p>
         <h2>Clipboard and undo</h2>

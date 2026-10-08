@@ -47,8 +47,9 @@ This companion script reads EMV's cached material values and adds an
    made before EMV captured its original values cannot be distinguished.
 4. Load your target mod ZIP or CMD into Color Sync, select the active color,
    and open **Import Freecam Colors** in section 2. Paste the string, preview
-   the changes, and click **Apply Colors**. Inactive Color 1 defaults update the
-   actual material files in the loaded mod ZIP, preserving inactive CMD overrides.
+   the changes, and click **Apply Colors**. Loose CMDs and colors-only ZIPs write
+   CMD colors and activate their targets. With matching MDF files loaded,
+   inactive Color 1 defaults update those materials and keep CMD overrides inactive.
    Review the shared palette and component scope shown in the preview.
 5. Export your CMD or mod ZIP normally. Material-default edits require their
    material files; use the full mod ZIP for shared bundle components.

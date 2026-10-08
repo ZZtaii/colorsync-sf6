@@ -6418,3 +6418,15 @@ main.page-width {
 .material-default-blocked {
     border-left-color: var(--muted);
 }
+
+/* Place the wrapped hex editor in the mobile row's full-width color field. */
+@media (max-width: 720px) {
+    #cluster-inspector .cluster-slot-row > .hex-input-control {
+        grid-area: hex !important;
+    }
+
+    #cluster-inspector .cluster-slot-name {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+}

@@ -1654,7 +1654,7 @@ async function refreshDiscoveredCustomMaterials() {
     }
     if (!refreshIsCurrent()) return null;
     state.customMdfMaterials = mergeMdfColorMaterials(importedMaterials, defaultMaterials);
-    const customCmdEntries = state.cmdEntries.filter(cmd => !isStandardDefaultPalette(cmd));
+    const customCmdEntries = state.cmdEntries.filter(cmd => !preservesDefaultCmdStructure(cmd));
     for (const material of state.customMdfMaterials) {
         if (!refreshIsCurrent()) return null;
         const requiredCount = Math.max(...material.customizeColorIndexes, -1) + 1;
@@ -1770,10 +1770,10 @@ function attachMaterialDefaultEditMetadata() {
         const materials = state.materialDefaultTargets.filter(material => material.name === cluster.name
             && (partTypeForPath(material.sourcePath) === null || types.includes(partTypeForPath(material.sourcePath))));
         const hasActualMaterials = types.some(type => coveredParts.has(type));
-        const ambiguous = materials.some(material => materials.some(other => (
+        const ambiguous = materials.length > 0 && (materials.some(material => materials.some(other => (
             other !== material && other.sourcePath === material.sourcePath
         ))) || cmd.colorClusters.filter(other => other.name === cluster.name
-            && (partTypes.get(other.instanceId) || []).some(type => types.includes(type))).length > 1;
+            && (partTypes.get(other.instanceId) || []).some(type => types.includes(type))).length > 1);
         for (const slot of cmdColorSlots(cluster)) {
             delete slot.materialEditBlockedReason;
             delete slot.materialDefaultTargets;
@@ -1793,9 +1793,9 @@ function attachMaterialDefaultEditMetadata() {
                 slot.materialEditBlockedReason = ambiguous
                     ? "This material name matches multiple entries. Its color cannot be matched safely."
                     : "This material or color slot is absent from the loaded mod materials. Load the complete mod ZIP to edit it.";
-            } else if (usesDefaultEdit && !targets.length) {
-                slot.materialEditBlockedReason = "This inactive Color 1 slot uses a material default. Load the complete mod ZIP, including its material files, to edit it safely.";
             }
+            // Loose CMDs and parts without a supplied mod MDF retain ordinary
+            // CMD overrides. Inactivity alone does not require an MDF edit.
             if (!targets.length || ambiguous || unsupported) continue;
             if (slot.enabled === false) {
                 const color = targets[0].customizeColors.find(color => color.index === slot.index);
@@ -5275,7 +5275,7 @@ function renderColorBackupPanel() {
 
 function customMaterialTemplateNames(material) {
     const requiredIndex = Math.max(...material.customizeColorIndexes, -1);
-    const customCmdEntries = state.cmdEntries.filter(cmd => !isStandardDefaultPalette(cmd));
+    const customCmdEntries = state.cmdEntries.filter(cmd => !preservesDefaultCmdStructure(cmd));
     const firstCmd = customCmdEntries[0];
     if (!firstCmd) return [];
     const names = [];
@@ -5417,10 +5417,14 @@ function isStandardDefaultPalette(cmd) {
     return cmd?.metadata?.variant === "standard" && cmd.metadata.paletteNumber === 1;
 }
 
+function preservesDefaultCmdStructure(cmd) {
+    return isStandardDefaultPalette(cmd) && state.materialDefaultTargets.length > 0;
+}
+
 function applyCustomMappingsToCmdEntry(cmd, mappings = state.customMaterialMappings) {
-    // Color 1 retains the supplied graph; missing custom materials use their
-    // MDF defaults instead of creating a new CMD override cluster.
-    if (isStandardDefaultPalette(cmd)) return cmd;
+    // A supplied mod MDF keeps Color 1 on its material defaults. Ordinary
+    // palettes can still prepare the slots declared by bundled stock MDF data.
+    if (preservesDefaultCmdStructure(cmd)) return cmd;
     if (!mappings.length) return cmd;
     const startingBuffer = cmd.workingBuffer;
     let buffer = startingBuffer;
@@ -5494,7 +5498,7 @@ async function addDiscoveredCustomMaterial(materialName, templateName, sourceMap
     };
     const rebuiltEntries = [];
     for (const cmd of state.cmdEntries) {
-        if (isStandardDefaultPalette(cmd)) continue;
+        if (preservesDefaultCmdStructure(cmd)) continue;
         const current = inspectCmdBuffer(cmd.workingBuffer);
         const sourceSlots = customMaterialInitialSlots(nextMapping, cmd);
         const colorCount = sourceSlots?.length || Math.max(...material.customizeColorIndexes, -1) + 1;
@@ -6716,12 +6720,12 @@ function renderColorClusters(clusters) {
                 flags.classList.add("is-inactive");
                 if (Array.isArray(color.mdfFallbackRgba)) {
                     flags.classList.add("is-mdf-default");
-                    flags.textContent = "material default";
+                    flags.textContent = "Inactive";
                     flags.title = color.materialDefaultTargets?.length
                         ? materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets)
-                        : "This slot is inactive; the game uses the material's default color.";
+                        : "This slot is inactive; the game uses the material's default color. Editing it activates a CMD override.";
                 } else {
-                    flags.textContent = "inactive";
+                    flags.textContent = "Inactive";
                 }
             } else {
                 flags.classList.add("is-active");

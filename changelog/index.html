@@ -10,7 +10,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
     <meta property="og:title" content="SF6 CMD Color Sync Changelog">
-    <meta property="og:description" content="See the Fluffy ZIP replacement fix in v1.3.1 and earlier releases.">
+    <meta property="og:description" content="See the Color 1 editing fix in v1.3.2 and earlier releases.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/changelog/">
     <meta name="twitter:card" content="summary">
     <title>Changelog | SF6 CMD Color Sync</title>
@@ -87,8 +87,18 @@
             <div class="hero-copy"><div class="eyebrow">Release history</div><h1>Changelog</h1><p class="lead">What shipped with SF6 CMD Color Sync and what is planned next.</p></div>
         </section>
 
+        <section class="release" id="v1-3-2">
+            <div class="release-head"><div><div class="eyebrow">Latest release · October 8, 2026</div><div class="version"><h2>v1.3.2</h2><span class="status shipped">Released</span></div><p class="release-intro">Restore ordinary Color 1 editing for loose CMDs and colors-only ZIPs while keeping shared material-default editing and original archive order.</p></div></div>
+            <div class="feature-grid" style="margin-top:24px">
+                <article class="feature"><div class="feature-mark">C1</div><h3>Edit inactive CMD targets again</h3><p>Loose CMDs, colors-only ZIPs, and model parts without supplied mod materials can activate edited targets, including Color 1. A complete mod ZIP is required only when editing its shared material defaults.</p></article>
+                <article class="feature"><div class="feature-mark">RGB</div><h3>Prepare missing stock slots</h3><p>Stock Color 1 palettes can prepare supported missing color slots again. Empty clusters use compatible slots from the same model part; Color 1 palettes with supplied mod material files retain their existing structure.</p></article>
+                <article class="feature"><div class="feature-mark">UI</div><h3>Keep inactive labels readable</h3><p>The original pill styling now uses a compact Inactive label, with material-default details in its tooltip. On narrow screens, hex fields span the row and slot names remain readable.</p></article>
+            </div>
+            <p class="note">Shared defaults still update matching mod materials while preserving inactive Color 1 CMD overrides. The ZIP entry-order fix remains in place.</p>
+        </section>
+
         <section class="release" id="v1-3-1">
-            <div class="release-head"><div><div class="eyebrow">Latest release · October 7, 2026</div><div class="version"><h2>v1.3.1</h2><span class="status shipped">Released</span></div><p class="release-intro">Preserve original ZIP entry order when replacing an existing Fluffy mod archive. Background decompression previously reordered entries, allowing Fluffy's cached indexes to install correct data under the wrong filenames.</p></div></div>
+            <div class="release-head"><div><div class="eyebrow">Previous release · October 7, 2026</div><div class="version"><h2>v1.3.1</h2><span class="status shipped">Released</span></div><p class="release-intro">Preserve original ZIP entry order when replacing an existing Fluffy mod archive. Background decompression previously reordered entries, allowing Fluffy's cached indexes to install correct data under the wrong filenames.</p></div></div>
             <div class="feature-grid" style="margin-top:24px">
                 <article class="feature"><div class="feature-mark">ZIP</div><h3>Keep archive entries in order</h3><p>Retain source entry order through import and full export, including large textures decompressed in workers. When no entries are removed, existing positions stay intact; new files are appended.</p></article>
                 <article class="feature"><div class="feature-mark">✓</div><h3>Verify installation mappings</h3><p>Checks now compare exported entry order as well as file contents, including the cached file-index mapping that caused the A.K.I. crash.</p></article>
