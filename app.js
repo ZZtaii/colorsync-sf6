@@ -123,6 +123,7 @@ const SF6_CHARACTERS = {
     esf031: "Alex",
     esf032: "Ingrid",
     esf033: "Yasmine",
+    esf034: "Arjun",
 };
 
 

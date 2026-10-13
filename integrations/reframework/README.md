@@ -1,6 +1,6 @@
 # EMV / Freecam → SF6 Color Sync
 
-Download the current [exporter v1.6 ZIP](SF6-Color-Sync-REFramework-v1.6.zip).
+Download the current [exporter v1.7 ZIP](SF6-Color-Sync-REFramework-v1.7.zip).
 The exporter is also available on
 [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
 If EMV Engine and Lua Freecam are not set up yet, follow the
@@ -10,7 +10,7 @@ Keep REFramework installed.
 Once EMV Engine and Lua Freecam are ready, place the exporter ZIP in Fluffy
 Mod Manager's `Games/SF6/Mods` folder. Refresh the mod list, enable
 **SF6 Color Sync - Freecam Exporter**, then start SF6.
-When upgrading, disable the older exporter entry before enabling v1.6 and
+When upgrading, disable the older exporter entry before enabling v1.7 and
 restart the game to load the new script.
 
 For manual installation, place `SF6 Color Sync.lua` in your SF6 game's
@@ -144,6 +144,7 @@ Version 1.6 shows only edited characters, automatically selects a single edited
 character, and groups reused costume parts under the owning body costume.
 Automated cache tests cover the A.K.I. C1/C6 grouping case and independent actors.
 The new exporter behavior still needs in-game confirmation.
+Version 1.7 adds the friendly name for Arjun (esf034).
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).

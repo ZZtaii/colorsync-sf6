@@ -116,7 +116,7 @@ editor or sync workflow instead.
 
 ## EMV / Lua Freecam color import
 
-Get the current [exporter v1.6 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.6.zip).
+Get the current [exporter v1.7 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.7.zip).
 For EMV Engine and Lua Freecam setup, follow the
 [setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
 Once both are ready, enable the exporter ZIP in Fluffy Mod Manager.

@@ -1,4 +1,4 @@
--- SF6 Color Sync clipboard bridge v1.6
+-- SF6 Color Sync clipboard bridge v1.7
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
@@ -12,6 +12,7 @@ local character_names = {
     esf016="Juri", esf017="Marisa", esf018="Guile", esf019="Ed", esf020="E. Honda",
     esf021="Jamie", esf022="Akuma", esf025="Sagat", esf026="M. Bison", esf027="Terry",
     esf028="Mai", esf029="Elena", esf030="C.Viper", esf031="Alex", esf032="Ingrid", esf033="Yasmine",
+    esf034="Arjun",
 }
 local function color_parameter(name)
     return type(name) == "string" and name:match("^CustomizeColor_%d+$") and name or nil
@@ -351,7 +352,7 @@ re.on_draw_ui(function()
         imgui.tree_pop()
         return
     end
-    imgui.text("Exporter v1.6")
+    imgui.text("Exporter v1.7")
     imgui.text("Edit colors in EMV / Freecam, then copy them into Color Sync.")
     refresh_groups(imgui.button("Refresh characters"))
     if #groups == 0 then
