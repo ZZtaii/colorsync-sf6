@@ -6871,12 +6871,13 @@ function renderColorClusters(clusters) {
             flags.className = "cluster-slot-flags";
             if (!isSlotEnabled(color)) {
                 flags.classList.add("is-inactive");
+                flags.title = "Inactive: the game uses the material default. Editing this slot activates a CMD override; the displayed CMD color may not match the default.";
                 if (Array.isArray(color.mdfFallbackRgba)) {
                     flags.classList.add("is-mdf-default");
                     flags.textContent = "Inactive";
                     flags.title = color.materialDefaultTargets?.length
                         ? materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets)
-                        : "This slot is inactive; the game uses the material's default color. Editing it activates a CMD override.";
+                        : "Inactive: showing the material default. Editing this slot activates a CMD override.";
                 } else {
                     flags.textContent = "Inactive";
                 }
