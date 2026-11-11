@@ -29,6 +29,11 @@
 // See AGENTS.md for product rules and architecture notes.
 // ============================================================
 
+import { buildMaterialPreviewState, previewMaterialId, resolvePreviewCommand, storedDefaultBytes } from "./lib/material-preview-state.js";
+import { createBrowserPreviewPanel } from "./lib/browser-preview-panel.js";
+import { createReasyPreviewPanel } from "./lib/reasy-preview-panel.js";
+import { createMaterialPreviewPanel } from "./lib/material-preview-panel.js";
+
 import { readCompressedZip as unzipArchive } from "./lib/zip-import.js";
 import { createCompressedZip } from "./lib/zip-archive.js";
 import {
@@ -130,16 +135,21 @@ const SF6_CHARACTERS = {
 const CMD_NAME_RE =
     /^esf(?<esf>\d{3})_(?<costume>\d{3})_cmd_(?:(?<variant>ex|dx)_)?(?<palette>\d{3})\.user\.(?<version>\d+)$/i;
 const CMD_VARIANT_ORDER = { standard: 0, ex: 1, dx: 2 };
-const MAX_MOD_ZIP_BYTES = 200 * 1024 * 1024;
-const MAX_MOD_UNPACKED_BYTES = 750 * 1024 * 1024;
+// Everything is held in browser memory (the ZIP, its unpacked files and later the export), so
+// these stay well under what a desktop tab can allocate. The unpacked size is read from the ZIP
+// directory before anything is inflated.
+const MAX_MOD_ZIP_BYTES = 1024 * 1024 * 1024;
+const MAX_MOD_UNPACKED_BYTES = 3 * 1024 * 1024 * 1024;
+const formatGiB = bytes => `${Number((bytes / (1024 ** 3)).toFixed(1))} GiB`;
 const SURPRISE_PRESETS = [
-    { id: "random", label: "Random" },
-    { id: "light", label: "Light" },
-    { id: "dark", label: "Dark" },
-    { id: "pastel", label: "Pastel" },
-    { id: "neon", label: "Neon" },
-    { id: "warm", label: "Warm" },
-    { id: "cool", label: "Cool" },
+    // `sample` is only the chip's preview strip; the colors come from createSurpriseRoll.
+    { id: "random", label: "Random", sample: "#e5484d, #f5a524, #46a758, #3e63dd, #8e4ec6" },
+    { id: "light", label: "Light", sample: "#f6d9c4, #d8efc9, #cfe6f5, #e3d2f2" },
+    { id: "dark", label: "Dark", sample: "#3a1620, #1f3322, #14283d, #2e1d45" },
+    { id: "pastel", label: "Pastel", sample: "#f7c6d0, #fbe3b5, #c5ebd3, #c3d9f7, #dcc8f3" },
+    { id: "neon", label: "Neon", sample: "#ff2bd6, #fff200, #00ff85, #00e5ff, #7a2bff" },
+    { id: "warm", label: "Warm", sample: "#d6336c, #e8590c, #f59f00, #ffd43b" },
+    { id: "cool", label: "Cool", sample: "#12b886, #15aabf, #228be6, #7048e8" },
 ];
 const SURPRISE_DEFAULTS = {
     preset: "random",
@@ -243,6 +253,9 @@ const colorPickerState = {
     resizingWindow: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
+    // Color a run of Surprise rolls started from, and the last rolled result.
+    surpriseBase: null,
+    surpriseLast: null,
 };
 
 const duplicateScopeState = {
@@ -427,6 +440,10 @@ const colorPickerOriginalSwatch = document.querySelector("#color-picker-original
 const colorPickerOriginalHex = document.querySelector("#color-picker-original-hex");
 const colorPickerOriginalName = document.querySelector("#color-picker-original-name");
 const colorPickerOriginalRestore = document.querySelector("#color-picker-original-restore");
+const colorPickerSurpriseStyles = document.querySelector("#color-picker-surprise-styles");
+const colorPickerSurpriseStrength = document.querySelector("#color-picker-surprise-strength");
+const colorPickerSurpriseValue = document.querySelector("#color-picker-surprise-value");
+const colorPickerSurpriseRoll = document.querySelector("#color-picker-surprise-roll");
 const colorPickerRuntimeSwatch = document.querySelector("#color-picker-runtime-swatch");
 const colorPickerRuntimeHex = document.querySelector("#color-picker-runtime-hex");
 const colorPickerRuntimeName = document.querySelector("#color-picker-runtime-name");
@@ -1834,13 +1851,45 @@ function materialDefaultScopeText(materialName, slotIndex, targets = null) {
     const palettes = state.cmdEntries.filter(cmd => cmd.colorClusters.some(cluster => (
         cluster.name === materialName && cluster.colors.some(slot => slot.index === slotIndex && !isSlotEnabled(slot)
             && (slot.materialDefaultTargets?.some(target => paths.has(target.sourcePath)) || paths.has(slot.mdfFallbackPath)))
-    ))).map(cmd => cmdDisplayName(cmd));
+    )));
     const roots = new Set(scopedTargets.map(material => material.root));
     const modRoot = zipEntryDirectory(state.importedMod?.modinfoPath);
-    const exportHint = [...roots].some(root => root.toLowerCase() !== modRoot.toLowerCase())
-        ? "Build the full mod ZIP to preserve the material variants."
-        : "Save a mod ZIP to include the material file.";
-    return `Shared default: ${palettes.join(", ") || "inactive palettes"}; ${roots.size} mod component${roots.size === 1 ? "" : "s"}. ${exportHint}`;
+    const components = roots.size > 1 ? ` in ${roots.size} mod components` : "";
+    return `Shared default for ${paletteScopeLabel(palettes)}${components}. ${materialDefaultExportHint(roots, modRoot)}`;
+}
+
+function materialDefaultExportHint(roots, modRoot = zipEntryDirectory(state.importedMod?.modinfoPath)) {
+    return [...roots].some(root => root.toLowerCase() !== modRoot.toLowerCase())
+        ? "Build the full mod ZIP to keep edits."
+        : "Save a mod ZIP to keep edits.";
+}
+
+// 1, 2, 3, 5 -> "1–3, 5"
+function compressNumberRanges(numbers) {
+    const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+    const parts = [];
+    for (let start = 0; start < sorted.length;) {
+        let end = start;
+        while (sorted[end + 1] === sorted[end] + 1) end += 1;
+        parts.push(end > start ? `${sorted[start]}–${sorted[end]}` : String(sorted[start]));
+        start = end + 1;
+    }
+    return parts.join(", ");
+}
+
+// Loaded CMDs share one character and costume, so palette numbers identify them.
+function paletteScopeLabel(cmds) {
+    if (!cmds.length) return "inactive palettes";
+    const byVariant = new Map();
+    for (const cmd of cmds) {
+        const variant = cmd.metadata.variant;
+        if (!byVariant.has(variant)) byVariant.set(variant, []);
+        byVariant.get(variant).push(cmd.metadata.paletteNumber);
+    }
+    return [...byVariant].map(([variant, numbers]) => {
+        const label = variant === "standard" ? (numbers.length === 1 ? "Color" : "Colors") : variant.toUpperCase();
+        return `${label} ${compressNumberRanges(numbers)}`;
+    }).join(", ");
 }
 
 function planColorSlotEdit(cmd, slot, rgba, { forceEnable = true } = {}) {
@@ -1951,6 +2000,7 @@ function revertMaterialDefaults() {
 }
 
 function resetLoadedCmdState() {
+    scheduleMaterialPreview();
     state.files = [];
     state.rejectedFiles = [];
     state.cmdEntries = [];
@@ -1996,7 +2046,7 @@ function clearReferenceImages() {
 
 async function handleModZip(file) {
     if (file.size > MAX_MOD_ZIP_BYTES) {
-        throw new Error("Mod ZIP is over the 200 MiB import limit.");
+        throw new Error(`Mod ZIP is ${formatGiB(file.size)}, over the ${formatGiB(MAX_MOD_ZIP_BYTES)} import limit.`);
     }
     showStatus(parserStatus, "", "Reading mod ZIP locally…");
     parserPanel?.classList.remove("hidden");
@@ -2004,10 +2054,12 @@ async function handleModZip(file) {
     try {
         const zipData = await readZipWithProgress(file);
         setZipImportProgress("Unpacking mod files…", 100, { indeterminate: true });
-        const entries = await unzipArchive(new Uint8Array(zipData));
-        const unpackedBytes = Object.values(entries).reduce((total, bytes) => total + bytes.byteLength, 0);
-        if (unpackedBytes > MAX_MOD_UNPACKED_BYTES) {
-            throw new Error("Mod ZIP expands beyond the 750 MiB safety limit.");
+        let entries;
+        try {
+            entries = await unzipArchive(new Uint8Array(zipData), { maxUnpackedBytes: MAX_MOD_UNPACKED_BYTES });
+        } catch (error) {
+            if (error?.code !== "ZIP_TOO_LARGE") throw error;
+            throw new Error(`Mod ZIP unpacks to ${formatGiB(error.unpackedBytes)}, over the ${formatGiB(MAX_MOD_UNPACKED_BYTES)} limit.`);
         }
 
         const paths = Object.keys(entries).filter(path => !path.endsWith("/"));
@@ -2204,7 +2256,7 @@ async function handleModZip(file) {
 async function loadCmdsFromColorLibrary(file) {
     const target = state.importedMod?.paletteTarget;
     if (!target) throw new Error("Load an eligible mod ZIP before selecting SF6 Colors.zip.");
-    if (file.size > MAX_MOD_ZIP_BYTES) throw new Error("SF6 Colors.zip is over the 200 MiB import limit.");
+    if (file.size > MAX_MOD_ZIP_BYTES) throw new Error(`SF6 Colors.zip is over the ${formatGiB(MAX_MOD_ZIP_BYTES)} import limit.`);
     setZipImportProgress("Reading SF6 Colors.zip…", 0);
     try {
         const zipData = await readZipWithProgress(file);
@@ -3537,6 +3589,7 @@ function revertAllChanges() {
 }
 
 function renderCurrentChanges() {
+    scheduleMaterialPreview();
     const grouped = getCurrentColorChanges();
     const total = grouped.reduce((n, g) => n + g.changes.length, 0);
 
@@ -4638,6 +4691,57 @@ function syncPickerFromRgba(rgba, { skipHex = false } = {}) {
     }
 }
 
+// Surprise Me inside the color box: the same style and strength as the Surprise Me menu, applied
+// to the one color being edited. It is an ordinary edit, so Revert and Current Changes cover it.
+function renderColorPickerSurprise() {
+    const { preset, intensity } = state.surpriseConfig;
+    const percent = Math.max(5, Math.round(intensity * 100));
+    if (colorPickerSurpriseStyles) {
+        if (!colorPickerSurpriseStyles.childElementCount) {
+            for (const option of SURPRISE_PRESETS) {
+                const chip = document.createElement("button");
+                chip.type = "button";
+                chip.className = "color-picker-surprise-style";
+                chip.dataset.preset = option.id;
+                chip.title = option.label;
+                chip.setAttribute("aria-label", `${option.label} style`);
+                chip.style.background = `linear-gradient(135deg, ${option.sample})`;
+                chip.addEventListener("click", () => {
+                    state.surpriseConfig.preset = option.id;
+                    saveSurpriseConfig();
+                    renderColorPickerSurprise();
+                    updateSurpriseButtonStates();
+                });
+                colorPickerSurpriseStyles.appendChild(chip);
+            }
+        }
+        for (const chip of colorPickerSurpriseStyles.children) {
+            chip.setAttribute("aria-pressed", String(chip.dataset.preset === preset));
+        }
+    }
+    if (colorPickerSurpriseStrength) {
+        colorPickerSurpriseStrength.value = String(percent);
+        colorPickerSurpriseStrength.style.setProperty("--fill", `${percent}%`);
+    }
+    if (colorPickerSurpriseValue) {
+        const label = SURPRISE_PRESETS.find(option => option.id === preset)?.label ?? "Random";
+        colorPickerSurpriseValue.textContent = `${label} · ${percent}%`;
+    }
+}
+
+function rollColorPickerSurprise() {
+    if (!colorPickerState.open) return;
+    // Rolling again starts from the color before the first roll, so low strengths do not drift.
+    const continuing = colorPickerState.surpriseLast && rgbaEquals(colorPickerState.rgba, colorPickerState.surpriseLast);
+    const base = continuing ? colorPickerState.surpriseBase : colorPickerState.rgba.slice();
+    const intensity = Math.max(0.05, state.surpriseConfig.intensity);
+    const rgba = mixSurpriseRgb(base, createSurpriseRoll(state.surpriseConfig.preset)(base), intensity);
+    colorPickerState.surpriseBase = base;
+    colorPickerState.surpriseLast = rgba;
+    syncPickerFromRgba(rgba);
+    emitPickerChange();
+}
+
 function emitPickerChange() {
     if (typeof colorPickerState.onChange === "function") {
         colorPickerState.onChange(colorPickerState.rgba.slice());
@@ -4779,6 +4883,9 @@ function openCustomColorPicker(anchor, rgba, onChange, onClose = null, { origina
     colorPickerState.onChange = onChange;
     colorPickerState.onClose = onClose;
     colorPickerState.originalRgba = (originalRgba ?? rgba ?? [255, 255, 255, 255]).map(clampByte);
+    colorPickerState.surpriseBase = null;
+    colorPickerState.surpriseLast = null;
+    renderColorPickerSurprise();
     syncPickerFromRgba(rgba ?? [255, 255, 255, 255]);
     customColorPicker?.classList.remove("hidden");
     positionColorPicker(anchor);
@@ -4890,6 +4997,13 @@ function bindColorPickerEvents() {
     colorPickerResize?.addEventListener("pointerup", stopResizingPickerWindow);
     colorPickerResize?.addEventListener("pointercancel", stopResizingPickerWindow);
     colorPickerResetLayout?.addEventListener("click", resetColorPickerLayout);
+    colorPickerSurpriseRoll?.addEventListener("click", rollColorPickerSurprise);
+    colorPickerSurpriseStrength?.addEventListener("input", () => {
+        state.surpriseConfig.intensity = Math.max(0.05, Math.min(1, Number(colorPickerSurpriseStrength.value) / 100));
+        saveSurpriseConfig();
+        renderColorPickerSurprise();
+        updateSurpriseButtonStates();
+    });
     colorPickerRuntimeInfo?.addEventListener("mouseenter", showRuntimeColorTooltip);
     colorPickerRuntimeInfo?.addEventListener("mouseleave", hideRuntimeColorTooltip);
     colorPickerRuntimeInfo?.addEventListener("focus", showRuntimeColorTooltip);
@@ -5926,45 +6040,53 @@ function surpriseRandomBetween(min, max) {
     return min + (max - min) * surpriseRandomUnit();
 }
 
-function randomThemeRgbKeepingAlpha(color, preset) {
-    const current = slotRgba(color) ?? [0, 0, 0, 255];
-    if (preset === "random") {
-        return [
-            Math.floor(surpriseRandomUnit() * 256),
-            Math.floor(surpriseRandomUnit() * 256),
-            Math.floor(surpriseRandomUnit() * 256),
-            current[3],
-        ];
-    }
+// Saturation and brightness ranges per style; warm and cool also limit the hue.
+const SURPRISE_STYLE_RANGES = {
+    random: { s: [0.3, 0.95], v: [0.16, 1] },
+    light: { s: [0.12, 0.55], v: [0.78, 1] },
+    dark: { s: [0.22, 0.9], v: [0.08, 0.34] },
+    pastel: { s: [0.18, 0.48], v: [0.82, 1] },
+    neon: { s: [0.82, 1], v: [0.78, 1] },
+    // Wraps across red so warm spans reds, oranges and yellows.
+    warm: { h: [345, 80], s: [0.48, 0.95], v: [0.48, 1] },
+    cool: { h: [150, 135], s: [0.42, 0.92], v: [0.42, 1] },
+};
+// Hue offsets from one base hue, so a roll reads as a palette instead of unrelated colors.
+const SURPRISE_HARMONIES = [
+    [0, 28, -28],
+    [0, 180, 24, 204],
+    [0, 120, 240],
+    [0, 150, 210],
+    [0, 40, 180],
+];
 
-    let h = surpriseRandomBetween(0, 360);
-    let s = surpriseRandomBetween(0.25, 0.85);
-    let v = surpriseRandomBetween(0.4, 0.9);
-
-    if (preset === "light") {
-        s = surpriseRandomBetween(0.12, 0.55);
-        v = surpriseRandomBetween(0.78, 1);
-    } else if (preset === "dark") {
-        s = surpriseRandomBetween(0.22, 0.9);
-        v = surpriseRandomBetween(0.08, 0.34);
-    } else if (preset === "pastel") {
-        s = surpriseRandomBetween(0.18, 0.48);
-        v = surpriseRandomBetween(0.82, 1);
-    } else if (preset === "neon") {
-        s = surpriseRandomBetween(0.82, 1);
-        v = surpriseRandomBetween(0.78, 1);
-    } else if (preset === "warm") {
-        // Wrap across red so warm colors span reds, oranges, and yellows.
-        h = (345 + surpriseRandomBetween(0, 80)) % 360;
-        s = surpriseRandomBetween(0.48, 0.95);
-        v = surpriseRandomBetween(0.48, 1);
-    } else if (preset === "cool") {
-        h = surpriseRandomBetween(150, 285);
-        s = surpriseRandomBetween(0.42, 0.92);
-        v = surpriseRandomBetween(0.42, 1);
-    }
-
-    return [...hsvToRgb(h, s, v), current[3]];
+// One roll = one click of Surprise Me. Within a roll:
+// - hues come from one color harmony (or the style's hue range),
+// - a slot keeps roughly its place from dark to bright, so shading and trim still read,
+// - slots that shared a color before share the new one.
+function createSurpriseRoll(preset) {
+    const range = SURPRISE_STYLE_RANGES[preset] ?? SURPRISE_STYLE_RANGES.random;
+    const baseHue = surpriseRandomBetween(0, 360);
+    const harmony = SURPRISE_HARMONIES[Math.floor(surpriseRandomUnit() * SURPRISE_HARMONIES.length)];
+    const assigned = new Map();
+    return current => {
+        const key = `${current[0]},${current[1]},${current[2]}`;
+        let rgb = assigned.get(key);
+        if (!rgb) {
+            const hue = range.h
+                ? range.h[0] + surpriseRandomBetween(0, range.h[1])
+                : baseHue + harmony[Math.floor(surpriseRandomUnit() * harmony.length)] + surpriseRandomBetween(-12, 12);
+            const brightness = Math.max(current[0], current[1], current[2]) / 255;
+            const place = 0.6 * brightness + 0.4 * surpriseRandomUnit();
+            rgb = hsvToRgb(
+                ((hue % 360) + 360) % 360,
+                surpriseRandomBetween(range.s[0], range.s[1]),
+                range.v[0] + (range.v[1] - range.v[0]) * place,
+            );
+            assigned.set(key, rgb);
+        }
+        return [rgb[0], rgb[1], rgb[2], current[3]];
+    };
 }
 
 function mixSurpriseRgb(current, target, intensity) {
@@ -5985,11 +6107,11 @@ function mixSurpriseRgb(current, target, intensity) {
     return rgba;
 }
 
-function surpriseColorForSlot(color) {
+function surpriseColorForSlot(color, roll) {
     const current = slotRgba(color) ?? [0, 0, 0, 255];
-    const { preset, intensity } = state.surpriseConfig;
+    const { intensity } = state.surpriseConfig;
     if (intensity <= 0) return current;
-    return mixSurpriseRgb(current, randomThemeRgbKeepingAlpha(color, preset), intensity);
+    return mixSurpriseRgb(current, roll(current), intensity);
 }
 
 function materialSlotKey(materialName, slotIndex) {
@@ -6022,10 +6144,6 @@ function getSurpriseTargets(cluster, cmd = state.cmdEntries[state.activeCmdIndex
         cluster: targetCluster,
         color,
     }));
-}
-
-function currentSurpriseTargetCount() {
-    return getSurpriseTargets(surpriseMenuState.cluster).length;
 }
 
 function recomputeInspectorDirty() {
@@ -6242,7 +6360,12 @@ function renderSurpriseMenu() {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "surprise-preset-button";
-            button.textContent = option.label;
+            const sample = document.createElement("span");
+            sample.className = "surprise-preset-sample";
+            sample.style.background = `linear-gradient(90deg, ${option.sample})`;
+            const label = document.createElement("span");
+            label.textContent = option.label;
+            button.append(sample, label);
             button.dataset.preset = option.id;
             button.classList.toggle("is-selected", option.id === selectedPreset);
             button.setAttribute("aria-pressed", String(option.id === selectedPreset));
@@ -6260,27 +6383,32 @@ function renderSurpriseMenu() {
     const intensityPercent = Math.round(state.surpriseConfig.intensity * 100);
     if (surpriseIntensity) surpriseIntensity.value = String(intensityPercent);
     if (surpriseIntensityValue) surpriseIntensityValue.textContent = `${intensityPercent}%`;
+    surpriseIntensity?.style.setProperty("--fill", `${intensityPercent}%`);
     document.querySelectorAll("input[name='surprise-target-mode']").forEach(input => {
         input.checked = input.value === state.surpriseConfig.targetMode;
     });
 
-    const count = currentSurpriseTargetCount();
-    const countLabel = `${count} active slot${count === 1 ? "" : "s"}`;
+    const surpriseTargets = getSurpriseTargets(surpriseMenuState.cluster);
+    const count = surpriseTargets.length;
+    const countLabel = `${count} slot${count === 1 ? "" : "s"}`;
+    const chosenMode = state.surpriseConfig.targetMode === "selected";
     if (surpriseMenuSummary) {
-        const presetLabel = SURPRISE_PRESETS.find(option => option.id === selectedPreset)?.label || "Random";
-        surpriseMenuSummary.textContent = `${presetLabel} · ${countLabel}`;
+        const materialCount = new Set(surpriseTargets.map(target => target.cluster.name)).size;
+        surpriseMenuSummary.textContent = chosenMode
+            ? `${countLabel} in ${materialCount} material${materialCount === 1 ? "" : "s"}`
+            : `${countLabel} in ${surpriseMenuState.cluster?.name || "this material"}`;
     }
     if (surpriseTargetSummary) {
-        surpriseTargetSummary.textContent = state.surpriseConfig.targetMode === "selected"
-            ? `${countLabel} selected across the active CMD`
-            : `${countLabel} in ${surpriseMenuState.cluster?.name || "this material"}`;
+        surpriseTargetSummary.textContent = count ? `${countLabel} chosen` : "No slots chosen yet";
+        surpriseTargetSummary.parentElement?.classList.toggle("hidden", !chosenMode);
     }
     if (surpriseApply) surpriseApply.disabled = count === 0 || state.surpriseConfig.intensity <= 0;
     if (surpriseEditTargets) {
         surpriseEditTargets.textContent = surpriseMenuState.targetPickerOpen
-            ? "Hide slot selector"
-            : "Select slots";
+            ? "Hide slots"
+            : "Choose slots";
     }
+    if (!chosenMode) surpriseMenuState.targetPickerOpen = false;
     surpriseTargetPicker?.classList.toggle("hidden", !surpriseMenuState.targetPickerOpen);
     if (surpriseTargetListToggle) {
         const expanded = !surpriseMenuState.targetListCollapsed;
@@ -6306,8 +6434,8 @@ function renderSurpriseMenu() {
     if (surpriseResetColors) {
         surpriseResetColors.disabled = !canResetCurrentMaterial;
         surpriseResetColors.title = canResetCurrentMaterial
-            ? `Reset randomized colors in ${surpriseMenuState.cluster?.name || "this material"}`
-            : "This material has no randomized colors to reset";
+            ? `Undo Surprise Me in ${surpriseMenuState.cluster?.name || "this material"}`
+            : "Nothing to undo in this material";
     }
     surpriseResetGroup?.classList.toggle("has-more", showResetMore);
     surpriseResetMore?.classList.toggle("hidden", !showResetMore);
@@ -6427,10 +6555,11 @@ function surpriseMaterialColors(cluster, { keepMenuOpen = false } = {}) {
 
     let cmdSnapshots = state.surpriseSnapshots.get(cmd);
     let changed = 0;
+    const roll = createSurpriseRoll(state.surpriseConfig.preset);
 
     for (const { cluster: targetCluster, color } of targets) {
         const current = slotRgba(color);
-        const rgba = surpriseColorForSlot(color);
+        const rgba = surpriseColorForSlot(color, roll);
         if (!current || rgbaEquals(current, rgba)) continue;
         if (!cmdSnapshots) {
             cmdSnapshots = new Map();
@@ -6605,6 +6734,7 @@ function bindSurpriseMenuEvents() {
 }
 
 function renderColorClusters(clusters) {
+    scheduleMaterialPreview();
     if (!clusterInspector) return;
     if (surpriseMenuState.open) closeSurpriseMenu();
     clusterInspector.innerHTML = "";
@@ -6636,6 +6766,7 @@ function renderColorClusters(clusters) {
         const card = document.createElement("details");
         card.className = "cluster-card";
         card.dataset.materialSource = group;
+        card.dataset.previewMaterialId = previewMaterialId(state.cmdEntries[state.activeCmdIndex], cluster);
         card.open = state.openClusterNames.has(cluster.name);
         card.addEventListener("toggle", () => {
             if (card.open) state.openClusterNames.add(cluster.name);
@@ -6702,6 +6833,8 @@ function renderColorClusters(clusters) {
 
         const list = document.createElement("div");
         list.className = "cluster-slot-list";
+        const sharedDefaults = { indexes: [], scopes: new Set(), roots: new Set() };
+        const blockedSlots = new Map();
 
         for (const color of cmdColorSlots(cluster)) {
             const row = document.createElement("div");
@@ -6808,20 +6941,42 @@ function renderColorClusters(clusters) {
 
             row.append(swatch, name, friendly, hexControl, flags);
             list.appendChild(row);
+            // One note per material; each slot's own scope stays on its
+            // Inactive badge tooltip.
             if (color.materialDefaultTargets?.length) {
-                const notice = document.createElement("p");
-                notice.className = "material-default-notice";
-                notice.dataset.materialDefaultNotice = "true";
-                notice.dataset.materialDefaultRootCount = String(new Set(color.materialDefaultTargets.map(target => target.root)).size);
-                notice.textContent = `${color.runtimeName}: ${materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets)}`;
-                list.appendChild(notice);
+                sharedDefaults.indexes.push(color.index);
+                sharedDefaults.scopes.add(materialDefaultScopeText(cluster.name, color.index, color.materialDefaultTargets));
+                for (const target of color.materialDefaultTargets) sharedDefaults.roots.add(target.root);
             } else if (color.materialEditBlockedReason) {
-                const notice = document.createElement("p");
-                notice.className = "material-default-notice material-default-blocked";
-                notice.textContent = `${color.runtimeName}: ${color.materialEditBlockedReason}`;
-                list.appendChild(notice);
+                if (!blockedSlots.has(color.materialEditBlockedReason)) blockedSlots.set(color.materialEditBlockedReason, []);
+                blockedSlots.get(color.materialEditBlockedReason).push(color.index);
             }
         }
+
+        const slotNotice = (indexes, text) => {
+            const notice = document.createElement("p");
+            notice.className = "material-default-notice";
+            const slots = document.createElement("strong");
+            slots.textContent = `CustomizeColor_${compressNumberRanges(indexes)}`;
+            notice.append(slots, ` ${text}`);
+            return notice;
+        };
+        const notices = [];
+        if (sharedDefaults.indexes.length) {
+            const components = sharedDefaults.roots.size > 1 ? ` in ${sharedDefaults.roots.size} mod components` : "";
+            const notice = slotNotice(sharedDefaults.indexes, sharedDefaults.scopes.size === 1
+                ? [...sharedDefaults.scopes][0]
+                : `Shared defaults${components}; hover Inactive for each slot's palettes. ${materialDefaultExportHint(sharedDefaults.roots)}`);
+            notice.dataset.materialDefaultNotice = "true";
+            notice.dataset.materialDefaultRootCount = String(sharedDefaults.roots.size);
+            notices.push(notice);
+        }
+        for (const [reason, indexes] of blockedSlots) {
+            const notice = slotNotice(indexes, reason);
+            notice.classList.add("material-default-blocked");
+            notices.push(notice);
+        }
+        list.prepend(...notices);
 
         card.appendChild(list);
         clusterInspector.appendChild(card);
@@ -7358,6 +7513,7 @@ function renderCommonPalettes() {
 }
 
 function renderSyncPanels() {
+    scheduleMaterialPreview();
     if (!state.cmdEntries.length) return;
 
     const activeCmd = state.cmdEntries[state.activeCmdIndex] ?? state.cmdEntries[0];
@@ -8439,6 +8595,158 @@ function setScreenshot(file, zipEntryName = null) {
 // BOOT
 // ============================================================
 
+// Preview failures are isolated from all existing editing and export behavior.
+let previewRevision = 0;
+let previewFingerprint = "";
+let previewSnapshot = null;
+let previewScheduled = false;
+const browserPreviewPanel = createBrowserPreviewPanel(document.querySelector("#browser-preview"), {
+    onSelectMaterial(materialId) {
+        document.querySelectorAll(".preview-located").forEach(node => node.classList.remove("preview-located"));
+        if (!materialId) return;
+        const card = [...document.querySelectorAll(".cluster-card")].find(node => node.dataset.previewMaterialId === materialId);
+        if (!card) return;
+        const section = card.closest("details.collapsible-section");
+        if (section) section.open = true;
+        card.open = true; card.classList.add("preview-located");
+        card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    },
+    // A swatch beside the 3D view opens the editor's own color picker for that slot, exactly like
+    // the swatch in the material list below. Returns false when the slot cannot be edited.
+    onOpenColorPicker(anchor, materialId, slotIndex) {
+        const cmd = state.cmdEntries[state.activeCmdIndex];
+        const cluster = cmd?.colorClusters?.find(c => previewMaterialId(cmd, c) === materialId);
+        const color = cluster?.colors?.find(c => c.index === slotIndex);
+        if (!color || !isSlotEditable(color)) return false;
+        // Start from the color the preview shows for this slot (see storedDefaultBytes).
+        const rgba = storedDefaultBytes(color, { modMaterial: state.materialDefaultBuffers.has(color.mdfFallbackPath) })
+            ?? slotRgba(color) ?? [0, 0, 0, 255];
+        const offset = color.color?.absoluteOffset;
+        const baseline = cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+        const originalRgba = color.materialDefaultOriginalRgba || (Number.isInteger(offset) ? rgbaAtOffset(baseline, offset) : rgba);
+        openCustomColorPicker(anchor, rgba, newRgba => {
+            try { applyColorEdit(color, newRgba); }
+            catch (error) { showStatus(parserStatus, "bad", error.message || String(error)); return; }
+            // Keep the matching row in the editor in step without rebuilding the whole list.
+            const card = [...document.querySelectorAll(".cluster-card")].find(node => node.dataset.previewMaterialId === materialId);
+            const row = card && [...card.querySelectorAll(".cluster-slot-row")].find(node => node.dataset.parameter === `CustomizeColor_${slotIndex}`);
+            if (!row) return;
+            const hex = rgbaToHexString(newRgba);
+            const hexInput = row.querySelector(".cluster-slot-hex"), swatch = row.querySelector(".cluster-slot-swatch"), friendly = row.querySelector(".cluster-slot-friendly");
+            if (hexInput) hexInput.value = hex;
+            if (swatch) swatch.style.backgroundColor = hex;
+            if (friendly) friendly.textContent = describeColorName(newRgba);
+        }, () => {
+            // On close, redraw the editor once so "Inactive"/"active" labels match the new state.
+            if (state.cmdEntries[state.activeCmdIndex] === cmd) renderColorClusters(cmd.colorClusters);
+        }, { originalRgba });
+        return true;
+    },
+    // Surprise Me beside the preview's colors is the editor's own Surprise Me for that material:
+    // same settings, same snapshots, so the editor's Discard Surprise undoes it too.
+    surprise: {
+        state(materialId) {
+            const cmd = state.cmdEntries[state.activeCmdIndex];
+            const cluster = previewCluster(cmd, materialId);
+            if (!cluster) return null;
+            return {
+                canSurprise: getSurpriseTargets(cluster, cmd).length > 0,
+                canUndo: hasRestorableSurpriseSlots(cmd, state.surpriseSnapshots.get(cmd)?.get(cluster.name)),
+            };
+        },
+        run: materialId => surpriseMaterialColors(previewCluster(state.cmdEntries[state.activeCmdIndex], materialId)),
+        undo: materialId => discardSurpriseMaterialColors(previewCluster(state.cmdEntries[state.activeCmdIndex], materialId)),
+    },
+    // Palette tabs of the full screen preview switch the active CMD, like the editor's own control.
+    palettes: {
+        list: () => state.cmdEntries.map((cmd, index) => ({
+            label: cmdShortName(cmd).replace(/^Color /, ""),
+            title: cmdDisplayName(cmd),
+            active: index === state.activeCmdIndex,
+        })),
+        select: index => { if (index !== state.activeCmdIndex) loadActiveCmd(index); },
+    },
+});
+function previewCluster(cmd, materialId) {
+    return cmd?.colorClusters?.find(cluster => previewMaterialId(cmd, cluster) === materialId) ?? null;
+}
+const reasyPreviewPanel =createReasyPreviewPanel(document.querySelector("#reasy-preview"), {
+    onSelectMaterial(materialId) {
+        document.querySelectorAll(".preview-located").forEach(node => node.classList.remove("preview-located"));
+        if (!materialId) return;
+        const card = [...document.querySelectorAll(".cluster-card")].find(node => node.dataset.previewMaterialId === materialId);
+        if (!card) return;
+        const section = card.closest("details.collapsible-section");
+        if (section) section.open = true;
+        card.open = true; card.classList.add("preview-located");
+        card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    },
+});
+const materialPreviewPanel = createMaterialPreviewPanel(document.querySelector("#material-preview"), {
+    onSelect(command) {
+        if (!command) {
+            document.querySelectorAll(".preview-located").forEach(node => node.classList.remove("preview-located"));
+            return;
+        }
+        try { applyMaterialPreviewCommand(command); }
+        catch (error) { showStatus(parserStatus, "bad", error.message); }
+    },
+});
+
+function publishMaterialPreview() {
+    browserPreviewPanel.setAssets(state.importedMod?.entries ?? null);
+    const next = buildMaterialPreviewState(state);
+    const fingerprint = JSON.stringify(next);
+    if (fingerprint === previewFingerprint) return previewSnapshot;
+    previewFingerprint = fingerprint;
+    next.revision = ++previewRevision;
+    previewSnapshot = next;
+    materialPreviewPanel.update(next);
+    reasyPreviewPanel.update(next);
+    browserPreviewPanel.update(next);
+    // Same-document adapters only. No server, postMessage, or implicit upload.
+    document.dispatchEvent(new CustomEvent("colorsync:preview-state", { detail: structuredClone(next) }));
+    return next;
+}
+
+function scheduleMaterialPreview() {
+    if (previewScheduled) return;
+    previewScheduled = true;
+    queueMicrotask(() => {
+        previewScheduled = false;
+        try { publishMaterialPreview(); }
+        catch (error) { console.warn("Material preview unavailable:", error); }
+    });
+}
+
+export function applyMaterialPreviewCommand(command) {
+    const snapshot = publishMaterialPreview();
+    const { material, parameter, cmdRgba } = resolvePreviewCommand(snapshot, command);
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const cluster = cmd.colorClusters.find(c => previewMaterialId(cmd, c) === material.id);
+    const slot = cluster?.colors.find(c => c.index === parameter.slotIndex);
+    if (!slot) throw new Error("The selected material is no longer loaded.");
+    if (command.type === "edit") {
+        // The existing planner decides CMD versus MDF and enforces write safety.
+        applyColorEdit(slot, cmdRgba);
+        renderColorClusters(cmd.colorClusters);
+        publishMaterialPreview();
+        return;
+    }
+    document.querySelectorAll(".preview-located").forEach(node => node.classList.remove("preview-located"));
+    const card = [...document.querySelectorAll(".cluster-card")].find(node => node.dataset.previewMaterialId === material.id);
+    const row = card && [...card.querySelectorAll(".cluster-slot-row")].find(node => node.dataset.parameter === parameter.name);
+    if (card && row) {
+        const section = card.closest("details.collapsible-section");
+        if (section) section.open = true;
+        card.open = true;
+        row.classList.add("preview-located");
+        row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        row.querySelector("input, button")?.focus({ preventScroll: true });
+    }
+}
+
+publishMaterialPreview();
 applyPersistedUiState();
 bindUi();
 bindSectionRail();

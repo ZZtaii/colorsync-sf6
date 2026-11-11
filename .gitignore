@@ -83,3 +83,6 @@ page-*.yml
 playwright-report/
 test-results/
 blob-report/
+
+# Local game-asset preview packs (never publish)
+private-local/

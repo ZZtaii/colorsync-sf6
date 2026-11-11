@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {triangleUvFrame} from '../lib/compact-frame.js';
+test('UV tangent frame preserves simple orientation and rejects degenerate UVs',()=>{assert.deepEqual(triangleUvFrame([0,0,0],[1,0,0],[0,1,0],[0,0],[1,0],[0,1]),{tangent:[1,0,0],bitangent:[0,1,0]});assert.equal(triangleUvFrame([0,0,0],[1,0,0],[0,1,0],[0,0],[0,0],[0,0]),null);});
