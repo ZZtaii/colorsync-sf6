@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {compactStudioLighting} from '../lib/compact-studio-lighting.js';
+test('studio shading is finite at roughness limits and grazing angles',()=>{for(const r of [0,.1,1])for(const m of [0,1])for(const n of [0,.01,1])assert.ok(compactStudioLighting([.2,.4,.6],{roughness:r,metalness:m},n,n,.5,.8).every(Number.isFinite));});
+test('actual material finish changes controlled response',()=>{assert.notDeepEqual(compactStudioLighting([.2,.4,.6],{roughness:.2,metalness:0},.8,.9,.9,.9),compactStudioLighting([.2,.4,.6],{roughness:.8,metalness:1},.8,.9,.9,.9));});

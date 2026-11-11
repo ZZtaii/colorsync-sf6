@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validatePreviewGeometry,encodeMaterialId,decodeMaterialId,normalizePreviewMaterial} from '../lib/material-webgl-preview.js';
+const mesh=()=>({parts:[{materialIndex:0,positions:new Float32Array([-1,-1,0,1,-1,0,0,1,0]),indices:new Uint16Array([0,1,2]),normals:null,uvs:null}]});
+test('real typed geometry bounds and normalization',()=>{assert.deepEqual(validatePreviewGeometry(mesh()),{min:[-1,-1,0],max:[1,1,0],center:[0,0,0],scale:.5});});
+test('invalid vertex index fails before GPU upload',()=>{const m=mesh();m.parts[0].indices[0]=3;assert.throws(()=>validatePreviewGeometry(m),/absent/);});
+test('non-finite geometry rejected',()=>{const m=mesh();m.parts[0].positions[0]=NaN;assert.throws(()=>validatePreviewGeometry(m),/Non-finite/);});
+test('malformed UV data rejected',()=>{const m=mesh();m.parts[0].uvs=new Float32Array(5);assert.throws(()=>validatePreviewGeometry(m),/UV/);});
+test('empty geometry rejected',()=>assert.throws(()=>validatePreviewGeometry({parts:[]}),/no renderable/));
+test('material pick IDs reserve background zero',()=>{assert.equal(decodeMaterialId([0,0,0]),null);for(const i of[0,1,254,255,65535,0xfffffe])assert.equal(decodeMaterialId(encodeMaterialId(i)),i);});
+test('out of range pick IDs rejected',()=>assert.throws(()=>encodeMaterialId(0xffffff)));
+test('linear color precision preserved',()=>{const c=[.21586050011389926,.001,.9,1];assert.deepEqual(normalizePreviewMaterial({color:c}).color,c);});
+test('roughness and metalness bounded',()=>{const m=normalizePreviewMaterial({roughness:0,metalness:8});assert.equal(m.roughness,.05);assert.equal(m.metalness,1);});
+test('mask mapping must be explicit',()=>assert.throws(()=>normalizePreviewMaterial({maskLayers:[{}]}),/explicit/));
+test('mask supports valid data mapping without guessing',()=>{const layer={channel:2,texture:{},color:[1,0,0,1],blendRate:.5};assert.equal(normalizePreviewMaterial({maskLayers:[layer]}).maskLayers.length,1);});

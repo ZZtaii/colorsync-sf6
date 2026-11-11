@@ -77,3 +77,9 @@ test("empty archives resolve and malformed archives reject", async () => {
     assert.deepEqual(await readCompressedZip(zipSync({})), {});
     await assert.rejects(readCompressedZip(strToU8("not a ZIP")));
 });
+
+test("an archive over the unpacked limit is refused before anything is inflated", async () => {
+    const archive = zipSync({ "a.bin": new Uint8Array(4000), "b.bin": new Uint8Array(4000) });
+    assert.deepEqual(Object.keys(await readCompressedZip(archive, { maxUnpackedBytes: 8000 })), ["a.bin", "b.bin"]);
+    await assert.rejects(readCompressedZip(archive, { maxUnpackedBytes: 7999 }), error => error.code === "ZIP_TOO_LARGE" && error.unpackedBytes === 8000);
+});

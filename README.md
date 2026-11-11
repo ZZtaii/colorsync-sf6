@@ -45,7 +45,7 @@ to a server.
 
 ### Mod ZIP workflow
 
-- Import a mod ZIP up to 200 MiB and preserve its metadata, screenshot, and
+- Import a mod ZIP up to 1 GiB and preserve its metadata, screenshot, and
   unrelated archive files byte-for-byte.
 - Preserve the imported ZIP's entry order during background decompression and
   full export. When no entries are removed, existing positions stay intact;
