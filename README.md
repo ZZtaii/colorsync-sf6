@@ -32,7 +32,11 @@ to a server.
   their CMD overrides inactive. Shared defaults show the affected palettes and
   component variants before export.
 - Replace an exact color throughout the active CMD.
-- Randomize the active slots in one material with Surprise Me.
+- See the costume in a 3D preview that follows your edits. It reads stock parts
+  and textures from your own game folder in the browser, follows model swaps
+  made through scene files, and can float or go full screen while you edit.
+- Randomize the active slots in one material with Surprise Me, or roll the
+  single color you are editing from the color box.
 - Add custom local images to the resizable reference viewer.
 - Color Sync: copy an active CMD slot to one or more target slots.
 - Pattern Sync: apply the same slot mapping across selected CMD palettes.
