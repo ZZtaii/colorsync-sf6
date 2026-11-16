@@ -97,7 +97,6 @@ import {
     formatSurfaceState,
     formatSurfaceValue,
     isSurfaceFieldWritable,
-    isSurfaceValueInRange,
     readSurfaceField,
     surfaceFieldBytesDiffer,
     surfaceLabel,
@@ -1899,10 +1898,17 @@ function materialDefaultScopeText(materialName, slotIndex, targets = null) {
     return `Shared default for ${paletteScopeLabel(palettes)}${components}. ${materialDefaultExportHint(roots, modRoot)}`;
 }
 
-/** Palettes whose CMD leaves this setting off read the MDF value being edited. */
+/** Palettes whose CMD leaves this setting off, on a model part the edited MDF covers, read its value. */
 function surfaceDefaultScopeText(materialName, key, slotIndex, targets = []) {
+    const partTypeForPath = path => {
+        const match = /esf\d{3}_\d{3}_(\d{2})(?:_|\.)/i.exec(zipEntryBaseName(path));
+        return ({ "00": 1, "01": 0, "02": 2 })[match?.[1]] ?? null;
+    };
+    const targetParts = new Set(targets.map(target => partTypeForPath(target.sourcePath)));
+    const coversCluster = cluster => !targets.length || targetParts.has(null)
+        || (cluster.materialPartTypes ?? []).some(type => targetParts.has(type));
     const palettes = state.cmdEntries.filter(cmd => cmd.colorClusters.some(cluster => (
-        cluster.name === materialName && cluster.colors.some(slot => {
+        cluster.name === materialName && coversCluster(cluster) && cluster.colors.some(slot => {
             const field = slot.index === slotIndex ? slot.surface?.[key] : null;
             const current = field ? readSurfaceField(cmd.workingBuffer, field) : null;
             return current && !current.enabled;
@@ -2858,16 +2864,17 @@ function canEditSlotSurface(cmd, slot, key) {
 
 /** Write one value into every MDF target of a Color 1 setting. True when bytes changed. */
 function writeSurfaceDefault(slot, key, targets, value) {
-    let changed = false;
+    // Patch every target first so a failing target leaves all MDFs unchanged.
+    const patched = new Map();
     for (const target of targets) {
         const record = state.materialDefaultBuffers.get(target.sourcePath);
         if (!record) throw new Error("Load the complete mod ZIP to edit this shared material default.");
-        const patch = writeMaterialDefaultScalar(record.workingBuffer, zipEntryBaseName(target.sourcePath), target.name,
-            key, slot.index, value, { materialIndex: target.materialIndex });
-        if (!patch.changed) continue;
-        record.workingBuffer = patch.buffer;
-        changed = true;
+        const patch = writeMaterialDefaultScalar(patched.get(target.sourcePath) ?? record.workingBuffer, zipEntryBaseName(target.sourcePath),
+            target.name, key, slot.index, value, { materialIndex: target.materialIndex });
+        if (patch.changed) patched.set(target.sourcePath, patch.buffer);
     }
+    for (const [sourcePath, buffer] of patched) state.materialDefaultBuffers.get(sourcePath).workingBuffer = buffer;
+    const changed = patched.size > 0;
     if (changed) {
         refreshMaterialDefaultTargets();
         attachMaterialDefaultEditMetadata();
@@ -7564,7 +7571,7 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         else if (!isDefault) reason = surfaceEditBlockedReason(cmd, slot, key, { activate: !current?.enabled });
         if (!current && !reason) reason = `This slot has no ${label} setting.`;
         if (reason) reasons.add(reason);
-        const editable = isDefault ? Boolean(defaults) : Boolean(current) && !reason;
+        const editable = isDefault ? Boolean(defaults) : Boolean(current) && canEditSlotSurface(cmd, slot, key);
         const shownValue = isDefault ? defaults?.value : current?.value;
 
         const line = document.createElement("div");
@@ -7672,9 +7679,14 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
             const value = clampSurfaceValue(range.value, key);
             surfaceSliderFill(range);
             number.value = String(Math.round(value * 100) / 100);
-            write({ enabled: true, value });
+            // CMD bytes are cheap to patch live. A material-file write re-parses the mod's MDFs,
+            // so it waits until the slider is released.
+            if (!isDefault) write({ enabled: true, value });
         });
-        range.addEventListener("change", rerender);
+        range.addEventListener("change", () => {
+            if (isDefault && !write({ enabled: true, value: clampSurfaceValue(range.value, key) })) return;
+            rerender();
+        });
         number.addEventListener("change", () => {
             const parsed = Number(number.value);
             if (number.value.trim() === "" || !Number.isFinite(parsed)) {
