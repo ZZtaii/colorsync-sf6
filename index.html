@@ -1235,15 +1235,19 @@
         id="surface-popover"
         class="surface-popover hidden"
         role="dialog"
-        aria-labelledby="surface-popover-title"
+        aria-label="Blend Rate, Roughness and Metalness"
     >
         <div class="surface-popover-header">
             <div class="surface-popover-heading">
-                <strong id="surface-popover-title">Blend Rate, Roughness and Metalness</strong>
+                <strong id="surface-popover-title"></strong>
                 <span id="surface-popover-slot" class="surface-popover-slot"></span>
             </div>
+            <button id="surface-popover-info" type="button" class="surface-popover-icon" aria-label="What these settings do" aria-expanded="false" aria-controls="surface-popover-help" title="What these settings do">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1" fill="currentColor"/></svg>
+            </button>
             <button id="surface-popover-close" type="button" class="surface-popover-close" aria-label="Close Blend Rate, Roughness and Metalness">×</button>
         </div>
+        <p id="surface-popover-help" class="surface-popover-help" hidden>Blend Rate sets how strongly this slot's color is applied (the material default is usually 1). Roughness and Metalness are added to the material's own values; 0 changes nothing. Turn a setting off to use the material default. Hover a name to see the game parameter.</p>
         <div id="surface-popover-body" class="surface-popover-body"></div>
     </div>
 

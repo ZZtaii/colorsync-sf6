@@ -7431,6 +7431,9 @@ const surfacePopover = document.querySelector("#surface-popover");
 const surfacePopoverBody = document.querySelector("#surface-popover-body");
 const surfacePopoverSlotLabel = document.querySelector("#surface-popover-slot");
 const surfacePopoverClose = document.querySelector("#surface-popover-close");
+const surfacePopoverTitle = document.querySelector("#surface-popover-title");
+const surfacePopoverInfo = document.querySelector("#surface-popover-info");
+const surfacePopoverHelp = document.querySelector("#surface-popover-help");
 const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false };
 
 function surfaceToggleKey(cluster, slot) {
@@ -7484,7 +7487,8 @@ function showSurfacePopover(anchor, cmd, cluster, slot) {
         fromPreview: Boolean(anchor.closest?.("#browser-preview")),
     });
     anchor.setAttribute("aria-expanded", "true");
-    if (surfacePopoverSlotLabel) surfacePopoverSlotLabel.textContent = `${cluster.name} · ${slot.runtimeName} · ${cmdDisplayName(cmd)}`;
+    if (surfacePopoverTitle) surfacePopoverTitle.textContent = `${cluster.name} · Slot ${slot.index}`;
+    if (surfacePopoverSlotLabel) surfacePopoverSlotLabel.textContent = cmdDisplayName(cmd);
     surfacePopover?.classList.remove("hidden");
     renderSlotSurfacePanel(surfacePopoverBody, cmd, slot, anchor);
     updateSurfaceToggle(anchor, cmd, slot);
@@ -7529,6 +7533,13 @@ function reattachSurfacePopover() {
 
 function bindSurfacePopover() {
     surfacePopoverClose?.addEventListener("click", () => closeSurfacePopover({ restoreFocus: true }));
+    // The explanation stays one click away instead of under every slot.
+    surfacePopoverInfo?.addEventListener("click", () => {
+        const open = surfacePopoverHelp?.hidden ?? false;
+        if (surfacePopoverHelp) surfacePopoverHelp.hidden = !open;
+        surfacePopoverInfo.setAttribute("aria-expanded", String(open));
+        positionSurfacePopover();
+    });
     document.addEventListener("pointerdown", event => {
         if (!surfacePopoverState.open) return;
         if (surfacePopover?.contains(event.target)) return;
@@ -7601,8 +7612,6 @@ function commitSurfaceEdit() {
     updateExportButtons();
 }
 
-const SURFACE_PANEL_HELP = "Blend Rate sets how strongly this slot's color is applied (the material default is usually 1). Roughness and Metalness are added to the material's own values; 0 changes nothing. Turn a setting off to use the material default.";
-
 function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
     panel.replaceChildren();
     const baselineBuffer = cmdSemanticBaseline(cmd);
@@ -7632,8 +7641,13 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         line.dataset.surfaceRoute = route.kind;
         line.classList.toggle("is-off", !isDefault && !current?.enabled);
 
+        // The game parameter name stays in the tooltip, not on screen.
+        const parameterName = surfaceRuntimeName(key, slot.index);
         const switchLabel = document.createElement("label");
         switchLabel.className = "surface-field-switch";
+        switchLabel.title = isDefault
+            ? `${parameterName}: kept in the mod's material file for Color 1.`
+            : `${parameterName}: ${current?.enabled ? "on, overrides the material default" : "off, uses the material default"}.`;
         const enabledInput = document.createElement("input");
         enabledInput.type = "checkbox";
         enabledInput.checked = Boolean(current?.enabled);
@@ -7643,10 +7657,13 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         const name = document.createElement("span");
         name.className = "surface-field-name";
         name.textContent = label;
-        const runtime = document.createElement("span");
-        runtime.className = "surface-field-runtime";
-        runtime.textContent = surfaceRuntimeName(key, slot.index);
-        switchLabel.append(enabledInput, name, runtime);
+        switchLabel.append(enabledInput, name);
+        if (isDefault) {
+            const tag = document.createElement("span");
+            tag.className = "surface-field-tag";
+            tag.textContent = "material file";
+            switchLabel.append(tag);
+        }
 
         const sliderWrap = document.createElement("div");
         sliderWrap.className = "surface-field-slider";
@@ -7660,16 +7677,21 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         range.disabled = !editable;
         range.setAttribute("aria-label", `${label} for ${slot.runtimeName}`);
         surfaceSliderFill(range);
+        sliderWrap.append(range);
+        // Signed offsets get a faint tick at 0 (no change).
+        if (min < 0) {
+            const zero = document.createElement("span");
+            zero.className = "surface-field-zero";
+            zero.setAttribute("aria-hidden", "true");
+            sliderWrap.append(zero);
+        }
         const scale = document.createElement("div");
         scale.className = "surface-field-scale";
-        const [low, high] = SURFACE_SCALE_LABELS[key];
-        const marks = key === "blendRate" ? [`${low} 0`, "0.5", `1 ${high}`] : [`${low} −1`, "0", `+1 ${high}`];
-        for (const text of marks) {
+        for (const text of SURFACE_SCALE_LABELS[key]) {
             const mark = document.createElement("span");
             mark.textContent = text;
             scale.appendChild(mark);
         }
-        sliderWrap.append(range, scale);
 
         const number = document.createElement("input");
         number.type = "number";
@@ -7681,19 +7703,16 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         number.disabled = !editable;
         number.setAttribute("aria-label", `${label} value for ${slot.runtimeName}`);
 
-        const status = document.createElement("span");
-        status.className = "surface-field-status";
-        status.textContent = isDefault ? "Material file" : (current?.enabled ? "Override" : "Material default");
-        if (isDefault) status.title = "Color 1 keeps this setting off in the CMD. This value is the mod's material file default.";
-
+        // Restore-original icon, shown only while this setting differs from the file.
         const reset = document.createElement("button");
         reset.type = "button";
-        reset.className = "secondary-button small-button surface-field-reset";
-        reset.textContent = "Original";
+        reset.className = "surface-field-reset";
+        reset.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4.5 9.5a5.5 5.5 0 1 1 1.6 3.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 5.5v4h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
         reset.title = isDefault
             ? `Restore the material file's original ${label}: ${formatSurfaceValue(defaults?.original, key)}`
             : (baseline ? `Restore the original ${label}: ${formatSurfaceState(baseline, key)}` : `Restore the original ${label}`);
-        reset.disabled = isDefault ? !defaults?.edited : (!field || !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field));
+        reset.setAttribute("aria-label", reset.title);
+        reset.hidden = isDefault ? !defaults?.edited : (!field || !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field));
 
         const write = next => {
             try {
@@ -7703,13 +7722,12 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
                 return false;
             }
             if (isDefault) {
-                reset.disabled = !surfaceDefaultValues(cmd, slot, key)?.edited;
+                reset.hidden = !surfaceDefaultValues(cmd, slot, key)?.edited;
             } else {
                 const after = readSurfaceField(cmd.workingBuffer, field);
                 enabledInput.checked = after.enabled;
                 line.classList.toggle("is-off", !after.enabled);
-                status.textContent = after.enabled ? "Override" : "Material default";
-                reset.disabled = !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field);
+                reset.hidden = !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field);
             }
             updateSurfaceToggle(surfacePopoverState.anchor ?? toggle, cmd, slot);
             return true;
@@ -7768,7 +7786,10 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
             rerender();
         });
 
-        line.append(switchLabel, sliderWrap, number, status, reset);
+        const head = document.createElement("div");
+        head.className = "surface-field-head";
+        head.append(switchLabel, reset, number);
+        line.append(head, sliderWrap, scale);
         panel.appendChild(line);
     }
 
@@ -7782,7 +7803,6 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         });
     }
     for (const reason of reasons) notes.push({ text: reason, cls: "is-blocked" });
-    if (!notes.length) notes.push({ text: SURFACE_PANEL_HELP, cls: "" });
     for (const { text, cls } of notes) {
         const note = document.createElement("p");
         note.className = `surface-note ${cls}`.trim();
