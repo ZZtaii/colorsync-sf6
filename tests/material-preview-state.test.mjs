@@ -110,3 +110,12 @@ test('an inactive slot shows its stored color unless that is a placeholder', () 
     slot.mdfFallbackLinearRgba = [128/255, 128/255, 128/255, 1];
     assert.equal(parameter(state).source, 'cmd-default');
 });
+test('edited Blend Rate in the live slot model replaces the value parsed at load',()=>{
+    const {state,cmd,slot}=fixture(false);
+    slot.optionInstanceId=4;
+    cmd.instanceParse={parsedInstances:[{index:4,fields:{BlendRate:{kind:'object',instanceId:5}}},{index:5,fields:{Enable:{kind:'bool',value:true},_Value:{kind:'f32',value:.75}}}]};
+    slot.surface={shared:false,blendRate:{enabled:true,value:.25}};
+    assert.deepEqual(buildMaterialPreviewState(state).materials[0].scalarParameters,[{name:'CustomizeColor_0_BlendRate',values:[.25],enabled:true,source:'cmd'}]);
+    slot.surface.blendRate.enabled=false;
+    assert.deepEqual(buildMaterialPreviewState(state).materials[0].scalarParameters,[]);
+});

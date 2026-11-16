@@ -6858,3 +6858,141 @@ body:has(.bp-stage.is-pinned:not(.is-placed)) .coffee-link { display: none !impo
 .bp select:hover { border-color: rgba(126, 146, 190, .6); }
 .bp select option, .bp select optgroup { background-color: #1b1f27; color: var(--text); }
 .bp select option:checked { background-color: #2a3350; }
+
+/* Blend Rate / Roughness / Metalness (16 Nov): an icon column on every slot row opens one shared
+   pop-up with a slider line per setting. Sliders fill outward from the "no change" point. */
+#cluster-inspector .cluster-slot-row {
+    grid-template-columns:
+        42px
+        minmax(150px, 1.1fr)
+        minmax(110px, 0.9fr)
+        minmax(140px, 1.1fr)
+        96px
+        42px !important;
+}
+#cluster-inspector .cluster-slot-surface-toggle {
+    position: relative; display: grid; place-items: center; width: 42px; height: 42px; min-height: 0; padding: 0;
+    border: 1px solid rgba(126, 146, 190, .28); border-radius: 10px; background: rgba(255, 255, 255, .03);
+    color: var(--muted); box-shadow: none; cursor: pointer; justify-self: end;
+}
+#cluster-inspector .cluster-slot-surface-toggle svg { width: 20px; height: 20px; pointer-events: none; }
+#cluster-inspector .cluster-slot-surface-toggle:hover:not(:disabled),
+#cluster-inspector .cluster-slot-surface-toggle:focus-visible { color: var(--text); border-color: var(--accent); transform: none; }
+#cluster-inspector .cluster-slot-surface-toggle[aria-expanded="true"] { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+/* Dot only for slots whose Blend Rate/Roughness/Metalness differ from the loaded file;
+   most stock slots already have Blend Rate on, so "on" alone is not marked. */
+#cluster-inspector .cluster-slot-surface-toggle.is-edited::after {
+    content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--warning);
+}
+#cluster-inspector .cluster-slot-surface-toggle:disabled { opacity: .35; cursor: not-allowed; }
+
+.surface-popover:not(.hidden) {
+    position: fixed; z-index: 1200; display: grid; gap: 12px;
+    width: min(480px, calc(100vw - 20px)); max-height: calc(100vh - 20px); padding: 14px 16px 16px; overflow: auto;
+    border: 1px solid rgba(126, 146, 190, .38); border-radius: 16px; background: #1b1f27; box-shadow: var(--shadow-floating);
+}
+.surface-popover.hidden { display: none; }
+html.bp-full-open .surface-popover { z-index: 2100 !important; }
+.surface-popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-right: 4px; }
+.surface-popover-heading strong { display: block; font-size: .95rem; }
+.surface-popover-slot { display: block; margin-top: 3px; color: var(--muted); font-size: .78rem; overflow-wrap: anywhere; }
+.surface-popover .surface-popover-close {
+    display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; min-width: 28px; min-height: 28px; padding: 0;
+    border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: var(--muted); font-size: 1.35rem; line-height: 1; cursor: pointer;
+}
+.surface-popover .surface-popover-close:hover { background: transparent; color: var(--accent-hover); transform: none; }
+.surface-popover .surface-popover-close:focus-visible { outline: 2px solid rgba(156, 124, 255, .72); outline-offset: 1px; }
+.surface-popover-body { display: grid; gap: 10px; }
+.surface-field {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto 76px; grid-template-areas: "switch status reset" "slider slider number";
+    align-items: center; gap: 6px 12px;
+}
+.surface-field + .surface-field { padding-top: 10px; border-top: 1px solid rgba(126, 146, 190, .12); }
+.surface-field-switch { grid-area: switch; }
+.surface-field-slider { grid-area: slider; }
+.surface-popover .surface-field-number { grid-area: number; }
+.surface-field-status { grid-area: status; }
+.surface-field-reset { grid-area: reset; justify-self: end; }
+.surface-field-switch { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; cursor: pointer; }
+.surface-field-switch input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.surface-field-name { color: var(--text); font-weight: 650; font-size: .88rem; }
+.surface-field-runtime { overflow: hidden; color: var(--muted); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.surface-field-slider { display: grid; gap: 2px; min-width: 0; }
+.surface-field-slider input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 0; padding: 0; border: 0; background: transparent; cursor: pointer;
+}
+.surface-field-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(126, 146, 190, .22) var(--from, 50%), var(--accent) var(--from, 50%), var(--accent) var(--to, 50%), rgba(126, 146, 190, .22) var(--to, 50%));
+}
+.surface-field-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px; margin-top: -5px; border: 2px solid #1a1e27; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(126, 146, 190, .5);
+}
+.surface-field-slider input[type="range"]::-moz-range-track {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(126, 146, 190, .22) var(--from, 50%), var(--accent) var(--from, 50%), var(--accent) var(--to, 50%), rgba(126, 146, 190, .22) var(--to, 50%));
+}
+.surface-field-slider input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border: 2px solid #1a1e27; border-radius: 50%; background: #fff; }
+.surface-field-slider input[type="range"]:focus-visible { outline: 2px solid rgba(156, 124, 255, .72); outline-offset: 3px; border-radius: 6px; }
+.surface-field-slider input[type="range"]:disabled { cursor: not-allowed; opacity: .45; }
+.surface-field.is-off .surface-field-slider input[type="range"]::-webkit-slider-runnable-track { filter: grayscale(1); opacity: .55; }
+.surface-field.is-off .surface-field-slider input[type="range"]::-moz-range-track { filter: grayscale(1); opacity: .55; }
+.surface-field-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: .68rem; font-variant-numeric: tabular-nums; }
+.surface-popover .surface-field-number {
+    width: 76px; min-width: 0; height: 34px; min-height: 0; padding: 0 8px; border-radius: 8px; font-size: .85rem; font-variant-numeric: tabular-nums;
+}
+.surface-popover .surface-field-number.invalid { border-color: var(--danger); }
+.surface-field-status { color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.surface-field:not(.is-off) .surface-field-status { color: var(--accent); }
+.surface-field-reset { min-height: 30px; white-space: nowrap; }
+.surface-note { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.surface-note.is-blocked { color: var(--warning); }
+.current-change-surface { color: var(--muted-strong); font-size: .85rem; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 480px) {
+    .surface-field { grid-template-columns: minmax(0, 1fr) 76px; grid-template-areas: "switch switch" "slider number" "status reset"; }
+}
+@media (max-width: 720px) {
+    #cluster-inspector .cluster-slot-row {
+        grid-template-columns: 42px 1fr 96px !important;
+        grid-template-areas:
+            "swatch name flags"
+            "swatch friendly surface"
+            "hex hex hex" !important;
+    }
+    #cluster-inspector .cluster-slot-surface-toggle { grid-area: surface; width: 36px; height: 30px; }
+}
+
+/* Phones: the pop-up becomes a sheet along the bottom edge, clear of the row it came from. */
+@media (max-width: 600px) {
+    .surface-popover:not(.hidden) { left: 10px !important; right: 10px; top: auto !important; bottom: 10px; width: auto; max-height: 70vh; }
+}
+
+/* Sync options: copy Blend Rate / Roughness / Metalness along with the color. */
+.sync-surface-option { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; color: var(--muted-strong); font-size: .86rem; cursor: pointer; }
+.sync-surface-option input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+
+/* Material-file Blend Rate / Roughness / Metalness rows in Current Changes have no color swatch. */
+.current-change-picker-spacer { display: block; width: 42px; height: 1px; }
+/* Color 1 settings kept in the mod's material file. */
+.surface-field[data-surface-route="default"] .surface-field-status { color: var(--warning); }
+.surface-note.is-default { color: var(--muted-strong); border-left: 2px solid var(--warning); padding-left: 10px; }
+
+/* Color box resize grip (16 Nov): the box scrolls when its content is taller than the size you
+   dragged it to, and an absolute grip scrolled away with the content. Keep it in the visible
+   bottom-right corner instead. Negative margins take it out of the grid flow (gap + its own size)
+   and into the box padding, so it sits where it always did when nothing scrolls. */
+#custom-color-picker .color-picker-resize {
+    position: sticky !important;
+    right: auto !important;
+    /* Sticky offsets are measured inside the box's 20px bottom padding: -17px = 3px from the edge. */
+    bottom: -17px !important;
+    justify-self: end;
+    align-self: end;
+    grid-column: 1 / -1;
+    margin: -34px -11px -17px auto !important;
+}
+
+/* 3D preview texture detail option. */
+.bp-check { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: .85rem; cursor: pointer; }
+.bp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }

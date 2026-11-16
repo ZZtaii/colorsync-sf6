@@ -10,7 +10,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
     <meta property="og:title" content="SF6 CMD Color Sync Changelog">
-    <meta property="og:description" content="See the 3D costume preview in v1.4 and earlier releases.">
+    <meta property="og:description" content="See Blend Rate, Roughness and Metalness editing in v1.5 and earlier releases.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/changelog/">
     <meta name="twitter:card" content="summary">
     <title>Changelog | SF6 CMD Color Sync</title>
@@ -87,8 +87,26 @@
             <div class="hero-copy"><div class="eyebrow">Release history</div><h1>Changelog</h1><p class="lead">What shipped with SF6 CMD Color Sync and what is planned next.</p></div>
         </section>
 
+        <section class="release" id="v1-5">
+            <div class="release-head"><div><div class="eyebrow">Latest release · November 16, 2026</div><div class="version"><h2>v1.5</h2><span class="status shipped">Released</span></div><p class="release-intro">Adjust how strongly each color slot is applied, and how rough and metallic it looks.</p></div></div>
+            <div class="feature-grid" style="margin-top:24px">
+                <article class="feature"><div class="feature-mark">SLOT</div><h3>Adjust Blend Rate, Roughness and Metalness</h3><p>Every color slot has a slider icon. It opens a small window with Blend Rate (0 to 1) and Roughness and Metalness offsets (-1 to 1), where 0 leaves the material unchanged. Edits appear in Current Changes and can be reverted like colors.</p></article>
+                <article class="feature"><div class="feature-mark">MDF</div><h3>Edit Color 1 of complete mods</h3><p>With a complete mod ZIP loaded, Color 1 settings that are off in the CMD are edited in the mod's own material file, the same way shared color defaults are. The window shows which palettes share the value.</p></article>
+                <article class="feature"><div class="feature-mark">SYNC</div><h3>Copy them with your colors</h3><p>Color Sync, Pattern Sync, and Duplicate Palette can also copy Blend Rate, Roughness, and Metalness. The option is off by default.</p></article>
+                <article class="feature"><div class="feature-mark">1.8</div><h3>Update the Freecam exporter</h3><p>Exporter v1.8 also copies edited CustomizeColor_N_BlendRate, CustomizeRoughness_N, and CustomizeMetal_N values. Color strings include these settings only where you edited them. Disable the older exporter entry before enabling v1.8.</p></article>
+                <article class="feature"><div class="feature-mark">3D</div><h3>Move the camera while you edit</h3><p>Ctrl (Cmd on a Mac) now works like Shift in the 3D preview, and Shift or Ctrl with the scroll wheel zooms straight away. Dragging the model or Shift/Ctrl-clicking it no longer closes an open color box.</p></article>
+                <article class="feature"><div class="feature-mark">1K</div><h3>Load sharper preview textures</h3><p>Turn on Sharper textures in the 3D preview's advanced settings to load textures up to 1024 × 1024 instead of 512 × 512. It is off by default because it uses about four times the memory.</p></article>
+                <article class="feature"><div class="feature-mark">HEX</div><h3>Paste colors faster</h3><p>A complete hex color pasted into the color box applies immediately, without pressing Enter. The color box's resize grip stays in its corner when the box scrolls.</p></article>
+            </div>
+            <div class="release-visuals" style="margin-top:24px">
+                <figure class="release-visual"><img src="../data/feature-guide/surface-settings-ui.webp" alt="Mai Outfit 1 Color 2 with the esf_Body00 material open and a window for CustomizeColor_1 showing Blend Rate 0.85, Roughness -0.35, and Metalness 0.6 sliders."><figcaption>Open a slot's slider icon to set its Blend Rate, Roughness, and Metalness.</figcaption></figure>
+                <figure class="release-visual"><img src="../data/feature-guide/surface-changes-ui.webp" alt="Current Changes listing esf_Body00 CustomizeColor_1 with Blend Rate 1.00 to 0.85, Roughness off to -0.35, and Metalness off to +0.60, next to a Revert button."><figcaption>The settings appear in Current Changes, where each slot can be reverted.</figcaption></figure>
+            </div>
+            <p class="note">The slider labels follow the setting names. How strongly each value changes a costume depends on its textures, so check the result in game.</p>
+        </section>
+
         <section class="release" id="v1-4">
-            <div class="release-head"><div><div class="eyebrow">Latest release · November 11, 2026</div><div class="version"><h2>v1.4</h2><span class="status shipped">Released</span></div><p class="release-intro">See your colors on the costume's real model while you edit.</p></div></div>
+            <div class="release-head"><div><div class="eyebrow">Previous release · November 11, 2026</div><div class="version"><h2>v1.4</h2><span class="status shipped">Released</span></div><p class="release-intro">See your colors on the costume's real model while you edit.</p></div></div>
             <div class="feature-grid" style="margin-top:24px">
                 <article class="feature"><div class="feature-mark">3D</div><h3>Preview the costume in 3D</h3><p>Open 3D preview to see the model with its textures. Color edits, palette switches, and Surprise Me show on the model as you make them.</p></article>
                 <article class="feature"><div class="feature-mark">PAK</div><h3>Read stock parts from your game</h3><p>Connect your Street Fighter 6 folder once. Parts and textures a mod does not include are read from your own game files in the browser. Nothing is uploaded.</p></article>

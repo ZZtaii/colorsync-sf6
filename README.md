@@ -28,6 +28,9 @@ to a server.
 ## Detailed features
 
 - Edit colors for any material slot.
+- Adjust each slot's Blend Rate (0 to 1) and Roughness and Metalness offsets
+  (-1 to 1) with sliders, and optionally copy them with Color Sync, Pattern Sync
+  and Duplicate Palette.
 - Edit inactive Color 1 material defaults from the actual mod ZIP while keeping
   their CMD overrides inactive. Shared defaults show the affected palettes and
   component variants before export.
@@ -35,6 +38,7 @@ to a server.
 - See the costume in a 3D preview that follows your edits. It reads stock parts
   and textures from your own game folder in the browser, follows model swaps
   made through scene files, and can float or go full screen while you edit.
+  Sharper textures (up to 1024 × 1024) can be turned on in its advanced settings.
 - Randomize the active slots in one material with Surprise Me, or roll the
   single color you are editing from the color box.
 - Add custom local images to the resizable reference viewer.
@@ -120,7 +124,7 @@ editor or sync workflow instead.
 
 ## EMV / Lua Freecam color import
 
-Get the current [exporter v1.7 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.7.zip).
+Get the current [exporter v1.8 ZIP](integrations/reframework/SF6-Color-Sync-REFramework-v1.8.zip).
 For EMV Engine and Lua Freecam setup, follow the
 [setup video](https://www.youtube.com/watch?v=fKdNqtsoxu0&t=2s).
 Once both are ready, enable the exporter ZIP in Fluffy Mod Manager.
