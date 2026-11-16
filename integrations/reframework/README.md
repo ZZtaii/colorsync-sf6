@@ -1,6 +1,6 @@
 # EMV / Freecam → SF6 Color Sync
 
-Download the current [exporter v1.7 ZIP](SF6-Color-Sync-REFramework-v1.7.zip).
+Download the current [exporter v1.8 ZIP](SF6-Color-Sync-REFramework-v1.8.zip).
 The exporter is also available on
 [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
 If EMV Engine and Lua Freecam are not set up yet, follow the
@@ -10,7 +10,7 @@ Keep REFramework installed.
 Once EMV Engine and Lua Freecam are ready, place the exporter ZIP in Fluffy
 Mod Manager's `Games/SF6/Mods` folder. Refresh the mod list, enable
 **SF6 Color Sync - Freecam Exporter**, then start SF6.
-When upgrading, disable the older exporter entry before enabling v1.7 and
+When upgrading, disable the older exporter entry before enabling v1.8 and
 restart the game to load the new script.
 
 For manual installation, place `SF6 Color Sync.lua` in your SF6 game's
@@ -19,7 +19,8 @@ This companion script reads EMV's cached material values and adds an
 **SF6 Color Sync** panel under REFramework's Script Generated UI.
 
 1. Open the character's **Materials** editor in EMV / Freecam, then edit its
-   `CustomizeColor_N` slots normally. Open each mesh's Materials editor for
+   `CustomizeColor_N` slots normally. Edited `CustomizeColor_N_BlendRate` values from 0 to 1 and
+   `CustomizeRoughness_N` / `CustomizeMetal_N` values from -1 to 1 are exported too. Open each mesh's Materials editor for
    meshes you want to include. EMV's **Change Multiple** edits are included
    when its affected meshes are in the material cache.
 2. Open **SF6 Color Sync**. Only characters with edited supported colors appear.
@@ -91,6 +92,8 @@ click **Save color export JSON** and import
 Color Sync's **Export Colors as String** panel uses this same format. It exports
 all active supported slots from the selected working CMD, including applied
 edits. Inactive slots and material defaults are omitted from this CMD-only string export.
+Blend Rate, Roughness and Metalness are included only where they were edited in
+Color Sync and are on, so plain color strings stay color-only (version 1).
 CMD bytes are decoded to full-precision linear floats so re-importing preserves
 RGB and alpha bytes exactly. No REFramework installation is needed for this
 browser-to-browser transfer.
@@ -112,6 +115,15 @@ to preserve them through REFramework's Windows text clipboard. For example:
   ],
   "skippedFields": 0
 }
+```
+
+Version 2 documents may also contain scalar Blend Rate, Roughness and Metalness entries,
+which Color Sync writes to the matching CMD slot's Option settings:
+
+```json
+{ "material": "esf_Body00", "parameter": "CustomizeColor_0_BlendRate", "value": 0.8 }
+{ "material": "esf_Body00", "parameter": "CustomizeRoughness_0", "value": 0.2 }
+{ "material": "esf_Body00", "parameter": "CustomizeMetal_0", "value": 1 }
 ```
 
 The browser validates the whole payload before any edits. Maximum: 1 MiB and
@@ -145,6 +157,10 @@ character, and groups reused costume parts under the owning body costume.
 Automated cache tests cover the A.K.I. C1/C6 grouping case and independent actors.
 The new exporter behavior still needs in-game confirmation.
 Version 1.7 adds the friendly name for Arjun (esf034).
+Version 1.8 also exports edited `CustomizeColor_N_BlendRate` values between 0 and 1
+and `CustomizeRoughness_N` / `CustomizeMetal_N` values between -1 and 1. Exports containing them use document version 2;
+color-only exports remain version 1. Mocked cache tests cover the new values;
+in-game confirmation is still pending.
 
 References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILVER),
 [REFramework](https://github.com/praydog/REFramework).

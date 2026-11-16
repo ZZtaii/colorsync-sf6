@@ -1,4 +1,4 @@
--- SF6 Color Sync clipboard bridge v1.7
+-- SF6 Color Sync clipboard bridge v1.8
 -- Install beside EMV Engine and Freecam in reframework/autorun/.
 -- Reads EMV's material cache; never writes game material values or CMD files.
 local PREFIX = "SF6COLORS:1:"
@@ -16,6 +16,25 @@ local character_names = {
 }
 local function color_parameter(name)
     return type(name) == "string" and name:match("^CustomizeColor_%d+$") and name or nil
+end
+
+-- Per-slot scalars stored in the CMD's color Option (version 2 exports).
+local function surface_parameter(name)
+    if type(name) ~= "string" then return nil end
+    if name:match("^CustomizeColor_%d+_BlendRate$") or name:match("^CustomizeRoughness_%d+$")
+        or name:match("^CustomizeMetal_%d+$") then return name end
+    return nil
+end
+
+local function scalar(value)
+    if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return nil end
+    return value
+end
+
+-- Blend Rate is 0..1; Roughness and Metalness offsets are -1..1.
+local function surface_in_range(name, value)
+    if name:match("_BlendRate$") then return value >= 0 and value <= 1 end
+    return value >= -1 and value <= 1
 end
 
 local function rgba(value)
@@ -188,7 +207,7 @@ end
 local function has_colors(object)
     for _, material in ipairs(object.materials or {}) do
         for _, name in ipairs(material.variable_names or {}) do
-            if color_parameter(name) then return true end
+            if color_parameter(name) or surface_parameter(name) then return true end
         end
     end
     return false
@@ -205,6 +224,11 @@ local function edited_signature(object)
                 if color and in_range(color) then
                     parts[#parts + 1] = table.concat({material.name or "", parameter,
                         string.format("%.17g,%.17g,%.17g,%.17g", table.unpack(color))}, "|")
+                end
+            elseif surface_parameter(parameter) and current ~= nil and original ~= nil and differs(current, original) then
+                local value = scalar(current)
+                if value and surface_in_range(parameter, value) then
+                    parts[#parts + 1] = table.concat({material.name or "", parameter, string.format("%.17g", value)}, "|")
                 end
             end
         end
@@ -292,7 +316,7 @@ end
 
 local function build_export(group)
     local current_groups, object_keys = collect_groups()
-    local changes, skipped, stale = {}, 0, 0
+    local changes, skipped, stale, surface_count = {}, 0, 0, 0
     for _, object in ipairs(group.snapshot_objects or group.objects) do
         if object_keys[object] ~= group.key or held_transforms[object.xform] ~= object then
             stale = stale + 1
@@ -312,11 +336,19 @@ local function build_export(group)
                 if current ~= nil and original ~= nil and differs(current, original) then
                     local color = rgba(current)
                     local supported_parameter = color_parameter(parameter)
+                    local surface = surface_parameter(parameter)
+                    local value = surface and scalar(current)
                     if supported_parameter and color and in_range(color) then
                         changes[#changes + 1] = {
                             material = material.name, parameter = supported_parameter, rgba = color,
                             mesh = object.name_w_parent or object.name or "",
                         }
+                    elseif surface and value and surface_in_range(surface, value) then
+                        changes[#changes + 1] = {
+                            material = material.name, parameter = surface, value = value,
+                            mesh = object.name_w_parent or object.name or "",
+                        }
+                        surface_count = surface_count + 1
                     else
                         skipped = skipped + 1
                     end
@@ -328,20 +360,22 @@ local function build_export(group)
     group.snapshot_objects = export_objects
     if current_group then group.source, group.info = current_group.source, current_group.info end
     group.label = group.info.title .. " (" .. #export_objects .. " cached meshes)"
-    if #changes == 0 then error("No edited CustomizeColor_N colors found. Other shader parameters are unsupported; BaseColor requires an MDF edit.") end
+    if #changes == 0 then error("No edited CustomizeColor_N, CustomizeColor_N_BlendRate, CustomizeRoughness_N or CustomizeMetal_N values found. Other shader parameters are unsupported; BaseColor requires an MDF edit.") end
     if #changes > 4096 then error("Too many edits for one export (maximum 4096).") end
     table.sort(changes, function(a, b)
         local a_key, b_key = a.material .. "|" .. a.parameter .. "|" .. a.mesh, b.material .. "|" .. b.parameter .. "|" .. b.mesh
         return a_key < b_key
     end)
+    -- Version 2 only when scalar entries are present, so color-only exports
+    -- still import into older Color Sync pages.
     local encoded = json.dump_string({
-        format = "sf6-freecam-colors", version = 1, colorSpace = "linear",
+        format = "sf6-freecam-colors", version = surface_count > 0 and 2 or 1, colorSpace = "linear",
         source = group.source, changes = changes, skippedFields = skipped,
     })
     if type(encoded) ~= "string" or encoded == "" then error("REFramework could not encode the color export.") end
     local text = PREFIX .. ascii_json(encoded)
     if #text > 1024 * 1024 then error("Color export exceeds the 1 MiB limit.") end
-    return text, #changes, skipped, #export_objects
+    return text, #changes, skipped, #export_objects, surface_count
 end
 
 re.on_draw_ui(function()
@@ -352,11 +386,11 @@ re.on_draw_ui(function()
         imgui.tree_pop()
         return
     end
-    imgui.text("Exporter v1.7")
+    imgui.text("Exporter v1.8")
     imgui.text("Edit colors in EMV / Freecam, then copy them into Color Sync.")
     refresh_groups(imgui.button("Refresh characters"))
     if #groups == 0 then
-        imgui.text("No edited CustomizeColor_N colors found. Open the costume's Materials editor in EMV and edit its colors.")
+        imgui.text("No edited CustomizeColor_N, CustomizeColor_N_BlendRate, CustomizeRoughness_N or CustomizeMetal_N values found. Open the costume's Materials editor in EMV and edit them.")
     else
         local labels, selected_index = {}, 1
         for index, group in ipairs(groups) do
@@ -374,18 +408,18 @@ re.on_draw_ui(function()
             end
         end
         if group.info.resource then imgui.text("Costume resource: " .. group.info.resource) end
-        imgui.text("Only costumes with edited CustomizeColor_N colors are listed. This list updates automatically as you change colors.")
+        imgui.text("Only costumes with edited CustomizeColor_N colors, blend rates, roughness or metal values are listed. This list updates automatically.")
         imgui.text("Use Refresh characters if the character objects change.")
-        imgui.text("Exports edited CustomizeColor_N colors, including EMV Change Multiple edits.")
+        imgui.text("Exports edited CustomizeColor_N colors, CustomizeColor_N_BlendRate (0 to 1) and CustomizeRoughness_N / CustomizeMetal_N (-1 to 1), including EMV Change Multiple edits.")
         if group.key:match("^mesh:") then
             imgui.text("Character grouping unavailable. Open hair/head Materials, refresh characters, and export each mesh separately.")
         end
         if imgui.button("Copy for Color Sync") then
-            local ok, text, count, skipped, mesh_count = pcall(build_export, group)
+            local ok, text, count, skipped, mesh_count, surface_count = pcall(build_export, group)
             if ok then
                 export_text = text
                 local copy_ok, copy_result = pcall(sdk.copy_to_clipboard, text)
-                status = (copy_ok and copy_result == true) and ("Copied " .. count .. " color edits from " .. mesh_count .. " mesh(es). Paste in Color Sync's Import Freecam Colors panel.")
+                status = (copy_ok and copy_result == true) and ("Copied " .. (count - surface_count) .. " color edits and " .. surface_count .. " blend/roughness/metal edits from " .. mesh_count .. " mesh(es). Paste in Color Sync's Import Freecam Colors panel.")
                     or ("Clipboard copy failed. Copy the text below with Ctrl+A, Ctrl+C.")
                 if skipped > 0 then status = status .. " Skipped " .. skipped .. " unsupported or out-of-range fields." end
             else

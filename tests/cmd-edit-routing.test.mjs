@@ -7,6 +7,7 @@ import { parseMdfMaterialNames } from "../lib/mdf-materials.js";
 import { discoverMaterialDefaultTargets, writeMaterialDefaultColor } from "../lib/material-default-edits.js";
 import { makeMdf } from "./fixtures/mdf.mjs";
 import { mergeMdfColorMaterials } from "../lib/default-mdf-materials.js";
+import * as surfaceLib from "../lib/sf6-surface.js";
 
 // Exercise the app's actual routing and mutation functions without its DOM or
 // private game assets. Top-level function closing braces start in column zero.
@@ -63,7 +64,7 @@ function fixture({ entries = null, palette = 1, variant = "standard", duplicateB
     };
     const preparation = [];
     const api = runInNewContext(`${functions}\n({${names.join(",")}})`, {
-        state, cmdColorSlots, parseMdfMaterialNames, discoverMaterialDefaultTargets, writeMaterialDefaultColor,
+        ...surfaceLib, state, cmdColorSlots, parseMdfMaterialNames, discoverMaterialDefaultTargets, writeMaterialDefaultColor,
         mergeMdfColorMaterials, loadDefaultMdfColorMaterials: loadDefaults,
         setColorEditorPreparing: value => preparation.push(value),
         renderColorClusters: () => {}, renderSyncPanels: () => {},

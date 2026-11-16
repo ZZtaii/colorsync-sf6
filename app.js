@@ -63,7 +63,7 @@ import {
     summarizeSf6ColorClusters,
 } from "./lib/sf6-colors.js";
 import { parseMdfMaterialNames } from "./lib/mdf-materials.js";
-import { discoverMaterialDefaultTargets, writeMaterialDefaultColor, writeMaterialDefaultLinearColor } from "./lib/material-default-edits.js";
+import { discoverMaterialDefaultTargets, writeMaterialDefaultColor, writeMaterialDefaultLinearColor, writeMaterialDefaultScalar } from "./lib/material-default-edits.js";
 import {
     loadDefaultMdfColorMaterials,
     mergeMdfColorMaterials,
@@ -89,6 +89,24 @@ import {
 } from "./lib/sf6-color-space.js";
 import { MAX_FREECAM_COLOR_BYTES, exportCmdColorTransfer, parseFreecamColorTransfer, planFreecamColorImport } from "./lib/freecam-colors.js";
 import { cmdColorSlots, normalizeCmdColorParameter } from "./lib/sf6-shader-colors.js";
+import {
+    SURFACE_KEYS,
+    clampSurfaceValue,
+    copySurfaceFieldBytes,
+    writeSurfaceBytes,
+    formatSurfaceState,
+    formatSurfaceValue,
+    isSurfaceFieldWritable,
+    isSurfaceValueInRange,
+    readSurfaceField,
+    surfaceFieldBytesDiffer,
+    surfaceLabel,
+    surfaceRange,
+    surfaceRuntimeName,
+    surfaceStatesEqual,
+    syncSurfaceModels,
+    writeSurfaceField,
+} from "./lib/sf6-surface.js";
 
 
 // ============================================================
@@ -213,6 +231,7 @@ const state = {
         sourceSlotIndex: 0,
         targetMaterial: "",
         targetSlotIndexes: [],
+        copySurface: false,
     },
 
     // Pattern Sync: multi-CMD, same mapping
@@ -222,6 +241,7 @@ const state = {
         targetMaterial: "",
         targetSlotIndexes: [],
         targetCmdIndexes: [],
+        copySurface: false,
     },
 
     // Duplicate Palette: one complete palette into selected standard CMDs.
@@ -234,6 +254,7 @@ const state = {
         scopeMode: "all",
         scopeSlots: [],
         undo: null,
+        copySurface: false,
     },
 };
 
@@ -1810,6 +1831,8 @@ function attachMaterialDefaultEditMetadata() {
             delete slot.materialEditBlockedReason;
             delete slot.materialDefaultTargets;
             delete slot.materialDefaultOriginalRgba;
+            delete slot.surfaceDefaultLocked;
+            delete slot.surfaceDefaultTargets;
             slot.materialName = cluster.name;
             const targets = materials.filter(material => material.customizeColors.some(color => color.index === slot.index));
             const unsupported = targets.some(material => {
@@ -1829,6 +1852,24 @@ function attachMaterialDefaultEditMetadata() {
             // Loose CMDs and parts without a supplied mod MDF retain ordinary
             // CMD overrides. Inactivity alone does not require an MDF edit.
             if (!targets.length || ambiguous || unsupported) continue;
+            // Standard Color 1 with the mod's own MDF keeps its inactive CMD
+            // overrides inactive. Blend Rate/Roughness/Metalness follow the same rule.
+            if (isStandardDefaultPalette(cmd)) {
+                slot.surfaceDefaultLocked = true;
+                // Baseline-inactive settings edit the MDF float, when every
+                // matching material declares exactly one single-float property.
+                slot.surfaceDefaultTargets = {};
+                for (const key of SURFACE_KEYS) {
+                    const field = slot.surface?.[key];
+                    const baselineField = field ? readSurfaceField(baseline, field) : null;
+                    if (!baselineField || baselineField.enabled) continue;
+                    const supported = targets.every(material => {
+                        const scalars = (material.customizeScalars ?? []).filter(scalar => scalar.key === key && scalar.index === slot.index);
+                        return scalars.length === 1 && scalars[0].componentCount === 1;
+                    });
+                    if (supported) slot.surfaceDefaultTargets[key] = targets;
+                }
+            }
             if (slot.enabled === false) {
                 const color = targets[0].customizeColors.find(color => color.index === slot.index);
                 slot.mdfFallbackRgba = color.cmdRgba.slice();
@@ -1853,6 +1894,21 @@ function materialDefaultScopeText(materialName, slotIndex, targets = null) {
             && (slot.materialDefaultTargets?.some(target => paths.has(target.sourcePath)) || paths.has(slot.mdfFallbackPath)))
     )));
     const roots = new Set(scopedTargets.map(material => material.root));
+    const modRoot = zipEntryDirectory(state.importedMod?.modinfoPath);
+    const components = roots.size > 1 ? ` in ${roots.size} mod components` : "";
+    return `Shared default for ${paletteScopeLabel(palettes)}${components}. ${materialDefaultExportHint(roots, modRoot)}`;
+}
+
+/** Palettes whose CMD leaves this setting off read the MDF value being edited. */
+function surfaceDefaultScopeText(materialName, key, slotIndex, targets = []) {
+    const palettes = state.cmdEntries.filter(cmd => cmd.colorClusters.some(cluster => (
+        cluster.name === materialName && cluster.colors.some(slot => {
+            const field = slot.index === slotIndex ? slot.surface?.[key] : null;
+            const current = field ? readSurfaceField(cmd.workingBuffer, field) : null;
+            return current && !current.enabled;
+        })
+    )));
+    const roots = new Set(targets.map(material => material.root));
     const modRoot = zipEntryDirectory(state.importedMod?.modinfoPath);
     const components = roots.size > 1 ? ` in ${roots.size} mod components` : "";
     return `Shared default for ${paletteScopeLabel(palettes)}${components}. ${materialDefaultExportHint(roots, modRoot)}`;
@@ -1972,15 +2028,47 @@ function getMaterialDefaultChanges() {
         group.targets.push(target);
         groups.set(key, group);
     }
+    // Blend Rate / Roughness / Metalness floats edited for Color 1 settings.
+    for (const target of state.materialDefaultTargets) for (const scalar of target.customizeScalars ?? []) {
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const original = originalMaterialDefaultScalar(target, scalar.key, scalar.index);
+        if (!record || !original || original.dataOffset !== scalar.dataOffset) continue;
+        const before = new Uint8Array(record.originalBuffer, scalar.dataOffset, 4);
+        const after = new Uint8Array(record.workingBuffer, scalar.dataOffset, 4);
+        if (before.every((value, index) => value === after[index])) continue;
+        let editCmd = null;
+        let colorRef = null;
+        for (const cmd of state.cmdEntries) for (const cluster of cmd.colorClusters) {
+            if (cluster.name !== target.name) continue;
+            const slot = cluster.colors.find(slot => slot.index === scalar.index && slot.surfaceDefaultTargets?.[scalar.key]?.some(candidate => (
+                candidate.sourcePath === target.sourcePath && candidate.materialIndex === target.materialIndex
+            )));
+            if (slot && !colorRef) { colorRef = slot; editCmd = cmd; }
+        }
+        const editTargets = colorRef?.surfaceDefaultTargets?.[scalar.key] || [target];
+        const scope = editTargets.map(target => [target.sourcePath, target.materialIndex]).sort();
+        const key = JSON.stringify([target.name, scalar.key, scalar.index, scope]);
+        const group = groups.get(key) || {
+            kind: "default-surface", cluster: target.name, slot: scalar.parameter, slotIndex: scalar.index,
+            surfaceKey: scalar.key, beforeValue: original.value, afterValue: scalar.value, targets: [],
+            editTargets, colorRef, cmd: editCmd,
+        };
+        group.targets.push(target);
+        groups.set(key, group);
+    }
     return [...groups.values()];
 }
 
 function revertMaterialDefaultChange(change) {
     for (const target of change.targets) {
-        const color = target.customizeColors.find(color => color.index === change.slotIndex);
         const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const property = change.kind === "default-surface"
+            ? materialDefaultScalar(target, change.surfaceKey, change.slotIndex)
+            : target.customizeColors.find(color => color.index === change.slotIndex);
+        if (!record || !property) continue;
+        const byteLength = change.kind === "default-surface" ? 4 : property.componentCount * 4;
         new Uint8Array(record.workingBuffer).set(
-            new Uint8Array(record.originalBuffer, color.dataOffset, color.componentCount * 4), color.dataOffset,
+            new Uint8Array(record.originalBuffer, property.dataOffset, byteLength), property.dataOffset,
         );
     }
     refreshMaterialDefaultTargets();
@@ -2702,6 +2790,212 @@ function setCmdColorParameter(cmd, materialName, parameter, rgba) {
     return setCmdColorSlot(cmd, materialName, address.index, rgba, { forceEnable: true });
 }
 
+// Blend Rate / Roughness / Metalness live in each slot's Option instance.
+// Ordinary edits patch the CMD (Enable byte + float32) in place. Standard
+// Color 1 with the mod's own MDF keeps baseline-inactive settings inactive;
+// those edit the matching existing MDF float instead (CustomizeColor_N_BlendRate,
+// CustomizeRoughness_N, CustomizeMetal_N), like inactive Color 1 colors.
+function cmdSemanticBaseline(cmd) {
+    return cmd.semanticBaselineBuffer ?? cmd.originalBuffer;
+}
+
+const SURFACE_LOCKED_REASON = "Color 1 of this mod keeps this setting in its material file, so it can't be turned on in the CMD.";
+const SURFACE_NO_DEFAULT_REASON = "This mod's material file doesn't include this setting, so Color 1 can't change it.";
+
+function surfaceEditBlockedReason(cmd, slot, key, { activate = false } = {}) {
+    const label = surfaceLabel(key);
+    if (!cmd || !slot || slot.error) return "This slot cannot be edited.";
+    const field = slot.surface?.[key];
+    if (!field) return `This slot has no ${label} setting.`;
+    if (!isSurfaceFieldWritable(cmd.workingBuffer, field)) return `This slot's ${label} setting has no safe editable offset.`;
+    if (slot.surface.shared) {
+        return "This slot shares its Blend Rate, Roughness and Metalness with another slot added for a custom material, so they can't be changed on their own.";
+    }
+    if (slot.materialEditBlockedReason) return slot.materialEditBlockedReason;
+    if (activate && slot.surfaceDefaultLocked) {
+        const baseline = readSurfaceField(cmdSemanticBaseline(cmd), field);
+        if (baseline && !baseline.enabled) return SURFACE_LOCKED_REASON;
+    }
+    return null;
+}
+
+/**
+ * Where an edit to this slot setting goes:
+ *   { kind: "cmd" }                       the CMD's own Enable + value
+ *   { kind: "default", targets }          the mod MDF's existing float (Color 1)
+ *   { kind: "blocked", reason }
+ */
+function surfaceEditRoute(cmd, slot, key) {
+    const reason = surfaceEditBlockedReason(cmd, slot, key);
+    if (reason) return { kind: "blocked", reason };
+    if (slot.surfaceDefaultLocked) {
+        const baseline = readSurfaceField(cmdSemanticBaseline(cmd), slot.surface[key]);
+        if (baseline && !baseline.enabled) {
+            const targets = slot.surfaceDefaultTargets?.[key] ?? [];
+            return targets.length ? { kind: "default", targets } : { kind: "blocked", reason: SURFACE_NO_DEFAULT_REASON };
+        }
+    }
+    return { kind: "cmd" };
+}
+
+function materialDefaultScalar(target, key, slotIndex) {
+    return (target?.customizeScalars ?? []).find(scalar => scalar.key === key && scalar.index === slotIndex) ?? null;
+}
+
+function originalMaterialDefaultScalar(target, key, slotIndex) {
+    const record = state.materialDefaultBuffers.get(target.sourcePath);
+    const material = record?.originalMaterials.find(candidate => candidate.materialIndex === target.materialIndex);
+    return materialDefaultScalar(material, key, slotIndex);
+}
+
+function canEditSlotSurface(cmd, slot, key) {
+    const route = surfaceEditRoute(cmd, slot, key);
+    if (route.kind !== "cmd") return route.kind === "default";
+    const current = readSurfaceField(cmd.workingBuffer, slot.surface[key]);
+    // A field that is already on can always be edited or turned off.
+    return !surfaceEditBlockedReason(cmd, slot, key, { activate: !current?.enabled });
+}
+
+/** Write one value into every MDF target of a Color 1 setting. True when bytes changed. */
+function writeSurfaceDefault(slot, key, targets, value) {
+    let changed = false;
+    for (const target of targets) {
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        if (!record) throw new Error("Load the complete mod ZIP to edit this shared material default.");
+        const patch = writeMaterialDefaultScalar(record.workingBuffer, zipEntryBaseName(target.sourcePath), target.name,
+            key, slot.index, value, { materialIndex: target.materialIndex });
+        if (!patch.changed) continue;
+        record.workingBuffer = patch.buffer;
+        changed = true;
+    }
+    if (changed) {
+        refreshMaterialDefaultTargets();
+        attachMaterialDefaultEditMetadata();
+    }
+    return changed;
+}
+
+/** Restore the original MDF float of a Color 1 setting in every target. */
+function revertSurfaceDefault(slot, key, targets) {
+    let changed = false;
+    for (const target of targets) {
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const original = originalMaterialDefaultScalar(target, key, slot.index);
+        const current = materialDefaultScalar(target, key, slot.index);
+        if (!record || !original || !current || original.dataOffset !== current.dataOffset) continue;
+        const bytes = new Uint8Array(record.originalBuffer, original.dataOffset, 4);
+        const working = new Uint8Array(record.workingBuffer, original.dataOffset, 4);
+        if (bytes.every((byte, index) => byte === working[index])) continue;
+        working.set(bytes);
+        changed = true;
+    }
+    if (changed) {
+        refreshMaterialDefaultTargets();
+        attachMaterialDefaultEditMetadata();
+    }
+    return changed;
+}
+
+/**
+ * Write { enabled, value } for one slot setting. Returns true when bytes changed.
+ * On the MDF route only the value applies; the CMD setting stays inactive.
+ */
+function setSlotSurface(cmd, slot, key, { enabled, value } = {}) {
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(Math.fround(value)))) {
+        throw new RangeError(`${surfaceLabel(key)} must be a finite number.`);
+    }
+    const route = surfaceEditRoute(cmd, slot, key);
+    if (route.kind === "blocked") throw new Error(route.reason);
+    if (route.kind === "default") {
+        if (enabled === false) return false;
+        return value === undefined ? false : writeSurfaceDefault(slot, key, route.targets, value);
+    }
+    const field = slot.surface[key];
+    const reason = surfaceEditBlockedReason(cmd, slot, key, { activate: enabled === true });
+    if (reason) throw new Error(reason);
+    const current = readSurfaceField(cmd.workingBuffer, field);
+    const next = {
+        enabled: typeof enabled === "boolean" ? enabled : current.enabled,
+        value: value === undefined ? current.value : Math.fround(value),
+    };
+    if (surfaceStatesEqual(current, next)) return false;
+    // Keep an untouched stored value byte-for-byte when only Enable changes.
+    writeSurfaceField(cmd.workingBuffer, field, {
+        enabled: next.enabled,
+        value: Object.is(Math.fround(current.value), Math.fround(next.value)) ? undefined : next.value,
+    });
+    return true;
+}
+
+function slotSurfaceChanges(baseline, working, slot) {
+    const changes = [];
+    for (const key of SURFACE_KEYS) {
+        const field = slot?.surface?.[key];
+        if (!field || !surfaceFieldBytesDiffer(baseline, working, field)) continue;
+        const before = readSurfaceField(baseline, field);
+        const after = readSurfaceField(working, field);
+        if (!before || !after) continue;
+        changes.push({ key, before, after });
+    }
+    return changes;
+}
+
+function revertSlotSurface(cmd, slot) {
+    for (const key of SURFACE_KEYS) {
+        const field = slot?.surface?.[key];
+        if (field) copySurfaceFieldBytes(cmd.workingBuffer, cmdSemanticBaseline(cmd), field);
+    }
+}
+
+function describeSurfaceChange(change) {
+    return `${surfaceLabel(change.key)}: ${formatSurfaceState(change.before, change.key)} → ${formatSurfaceState(change.after, change.key)}`;
+}
+
+// Source surface for a copy: the exact stored state of each field.
+function readSlotSurfaceStates(cmd, slot) {
+    const states = {};
+    for (const key of SURFACE_KEYS) {
+        const field = slot?.surface?.[key];
+        states[key] = field ? readSurfaceField(cmd.workingBuffer, field) : null;
+    }
+    return states;
+}
+
+/**
+ * Copy source surface states onto a target slot. Fields the target cannot take
+ * (missing, shared, or locked) are counted, never forced. With `allowDefault`,
+ * a Color 1 setting kept in the mod's MDF takes the source value there, the
+ * same way Color Sync writes Color 1 color defaults; a source that is off has
+ * no value of its own, so it leaves the target's default alone.
+ */
+function copySlotSurface(cmd, slot, states, { allowDefault = false } = {}) {
+    const result = { changed: 0, skipped: 0 };
+    for (const key of SURFACE_KEYS) {
+        const source = states?.[key];
+        if (!source) continue;
+        const route = surfaceEditRoute(cmd, slot, key);
+        if (route.kind === "default") {
+            if (!source.enabled) continue;
+            if (!allowDefault) {
+                const current = materialDefaultScalar(route.targets[0], key, slot.index);
+                if (!current || !Object.is(Math.fround(current.value), Math.fround(source.value))) result.skipped += 1;
+                continue;
+            }
+            if (writeSurfaceDefault(slot, key, route.targets, source.value)) result.changed += 1;
+            continue;
+        }
+        const field = slot?.surface?.[key];
+        const current = field ? readSurfaceField(cmd.workingBuffer, field) : null;
+        if (current && surfaceStatesEqual(current, source)) continue;
+        if (route.kind === "blocked" || surfaceEditBlockedReason(cmd, slot, key, { activate: source.enabled })) {
+            result.skipped += 1;
+            continue;
+        }
+        if (setSlotSurface(cmd, slot, key, { enabled: source.enabled, value: source.value })) result.changed += 1;
+    }
+    return result;
+}
+
 
 // ============================================================
 // @anchor sync-engine
@@ -2866,6 +3160,7 @@ function applyColorSync() {
     }
 
     const rgba = slotRgba(source);
+    const surfaceStates = state.colorSync.copySurface ? readSlotSurfaceStates(cmd, source) : null;
     const results = [];
 
     targetSlotIndexes.forEach(index => {
@@ -2881,10 +3176,15 @@ function applyColorSync() {
             rgba,
             { forceEnable: true },
         );
+        const surface = surfaceStates
+            ? copySlotSurface(cmd, getColorSlot(cmd, targetMaterial, slotIndex), surfaceStates, { allowDefault: true })
+            : { changed: 0, skipped: 0 };
         results.push({
             file: cmd.file.name,
             slotIndex,
             changed,
+            surfaceChanged: surface.changed,
+            surfaceSkipped: surface.skipped,
         });
     }
 
@@ -2919,6 +3219,8 @@ function applyPatternSync() {
     const results = [];
     let applied = 0;
     let skippedDisabled = 0;
+    let surfaceChanged = 0;
+    let surfaceSkipped = 0;
 
     for (const index of targetCmdIndexes) {
         const cmd = state.cmdEntries[index];
@@ -2953,6 +3255,7 @@ function applyPatternSync() {
         }
 
         const rgba = slotRgba(source);
+        const surfaceStates = state.patternSync.copySurface ? readSlotSurfaceStates(cmd, source) : null;
         const slotResults = [];
 
         for (const slotIndex of targetSlotIndexes) {
@@ -2963,7 +3266,12 @@ function applyPatternSync() {
                 rgba,
                 { forceEnable: true },
             );
-            slotResults.push({ slotIndex, changed });
+            const surface = surfaceStates
+                ? copySlotSurface(cmd, getColorSlot(cmd, targetMaterial, slotIndex), surfaceStates, { allowDefault: true })
+                : { changed: 0, skipped: 0 };
+            surfaceChanged += surface.changed;
+            surfaceSkipped += surface.skipped;
+            slotResults.push({ slotIndex, changed, surfaceChanged: surface.changed });
             if (changed) applied += 1;
         }
 
@@ -2984,7 +3292,7 @@ function applyPatternSync() {
     renderSyncPanels();
     updateExportButtons();
 
-    return { results, applied, skippedDisabled };
+    return { results, applied, skippedDisabled, surfaceChanged, surfaceSkipped };
 }
 
 
@@ -3037,6 +3345,7 @@ function buildPaletteDuplicatePlan(source, target, scopeKeys = null) {
                 targetSlot,
                 rgba: rgbaAtOffset(source.workingBuffer, sourceSlot.color.absoluteOffset),
                 enabled: rawSlotEnabled(source, sourceSlot),
+                surface: state.paletteDuplicate?.copySurface ? readSlotSurfaceStates(source, sourceSlot) : null,
             });
         }
     }
@@ -3092,9 +3401,13 @@ function applyPaletteDuplicate() {
     let copied = 0;
     let changed = 0;
     let enableSkipped = 0;
+    let surfaceChanged = 0;
+    let surfaceSkipped = 0;
 
     for (const { index: cmdIndex, cmd, plan } of targetPlans) {
         for (const operation of plan.operations) {
+            // Exact byte snapshots of the target's surface fields for undo.
+            const beforeSurfaceBytes = operation.surface ? snapshotSurfaceBytes(cmd.workingBuffer, operation.targetSlot) : [];
             const targetOffset = operation.targetSlot.color.absoluteOffset;
             const beforeRgba = rgbaAtOffset(cmd.workingBuffer, targetOffset);
             const beforeEnabled = rawSlotEnabled(cmd, operation.targetSlot);
@@ -3125,8 +3438,14 @@ function applyPaletteDuplicate() {
                 enableSkipped += 1;
             }
 
+            const surface = operation.surface
+                ? copySlotSurface(cmd, operation.targetSlot, operation.surface)
+                : { changed: 0, skipped: 0 };
+            surfaceChanged += surface.changed;
+            surfaceSkipped += surface.skipped;
+
             copied += 1;
-            if (!rgbaEquals(beforeRgba, operation.rgba) || enableChanged) {
+            if (!rgbaEquals(beforeRgba, operation.rgba) || enableChanged || surface.changed) {
                 changed += 1;
                 undoOperations.push({
                     cmdIndex,
@@ -3137,6 +3456,7 @@ function applyPaletteDuplicate() {
                     enableByteLength,
                     beforeEnabled,
                     beforeEnableBytes,
+                    beforeSurfaceBytes: surface.changed ? beforeSurfaceBytes : [],
                 });
             }
         }
@@ -3166,7 +3486,40 @@ function applyPaletteDuplicate() {
         missingMaterials,
         missingSlots,
         enableSkipped,
+        surfaceChanged,
+        surfaceSkipped,
     };
+}
+
+function surfaceCopyMessage(changed, skipped, enabled) {
+    if (!enabled) return "";
+    let message = ` Copied ${changed} Blend Rate/Roughness/Metalness setting${changed === 1 ? "" : "s"}.`;
+    if (skipped) message += ` ${skipped} could not be copied (Color 1 keeps inactive settings in the mod's material file, or the slot is shared or read only).`;
+    return message;
+}
+
+function snapshotSurfaceBytes(buffer, slot) {
+    const snapshot = [];
+    for (const key of SURFACE_KEYS) {
+        const field = slot?.surface?.[key];
+        if (!field || !isSurfaceFieldWritable(buffer, field)) continue;
+        for (const { absoluteOffset, byteLength } of [field.enable, field.valueField]) {
+            const length = Math.max(1, byteLength);
+            snapshot.push({ offset: absoluteOffset, bytes: new Uint8Array(buffer.slice(absoluteOffset, absoluteOffset + length)) });
+        }
+    }
+    return snapshot;
+}
+
+function restoreSurfaceBytes(buffer, snapshot) {
+    let changed = false;
+    const bytes = new Uint8Array(buffer);
+    for (const { offset, bytes: saved } of snapshot ?? []) {
+        if (offset < 0 || offset + saved.length > bytes.length) continue;
+        if (saved.some((value, index) => bytes[offset + index] !== value)) changed = true;
+        bytes.set(saved, offset);
+    }
+    return changed;
 }
 
 function renderDuplicateUndoButton() {
@@ -3201,8 +3554,11 @@ function undoLastPaletteDuplicate() {
             if (operation.targetSlot.enable) operation.targetSlot.enable.value = operation.beforeEnabled;
         }
 
-        if (!rgbaEquals(currentRgba, operation.beforeRgba) || enableChanged) changed += 1;
+        const surfaceRestored = restoreSurfaceBytes(cmd.workingBuffer, operation.beforeSurfaceBytes);
+
+        if (!rgbaEquals(currentRgba, operation.beforeRgba) || enableChanged || surfaceRestored) changed += 1;
     }
+    for (const cmd of state.cmdEntries) syncSurfaceModels(cmd.workingBuffer, cmd.colorClusters);
 
     state.paletteDuplicate.undo = null;
     state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(cmd => (
@@ -3239,9 +3595,13 @@ function getCurrentColorChanges() {
                 const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
                 const beforeEnabled = enabledAtOffset(baseline, color.enable?.absoluteOffset, color.enable?.byteLength);
                 const afterEnabled = enabledAtOffset(cmd.workingBuffer, color.enable?.absoluteOffset, color.enable?.byteLength);
-                if (rgbaEquals(beforeRgba, afterRgba) && beforeEnabled === afterEnabled) continue;
+                const colorChanged = !rgbaEquals(beforeRgba, afterRgba) || beforeEnabled !== afterEnabled;
+                const surfaceChanges = slotSurfaceChanges(baseline, cmd.workingBuffer, color);
+                if (!colorChanged && !surfaceChanges.length) continue;
 
                 changes.push({
+                    colorChanged,
+                    surfaceChanges,
                     cmdIndex,
                     cluster: cluster.name,
                     slot: color.runtimeName,
@@ -3287,6 +3647,7 @@ function revertChange(cmdIndex, offset) {
         slot.enabled = enabled;
         slot.enable.value = enabled;
     }
+    revertSlotSurface(cmd, slot);
     removeSurpriseSnapshotSlot(cmd, offset);
     attachMaterialDefaultEditMetadata();
     state.inspectorDirty = hasMaterialDefaultEdits() || state.cmdEntries.some(hasPendingColorEdits);
@@ -3577,6 +3938,7 @@ function revertAllChanges() {
                 }
             }
         }
+        syncSurfaceModels(cmd.workingBuffer, cmd.colorClusters);
     }
 
     state.surpriseSnapshots.clear();
@@ -3615,15 +3977,53 @@ function renderCurrentChanges() {
             const row = document.createElement("div");
             row.className = "current-change-row";
 
+            if (change.kind === "default-surface") {
+                // A Color 1 Blend Rate / Roughness / Metalness kept in the mod's MDF.
+                row.dataset.materialDefault = "true";
+                const meta = document.createElement("div");
+                meta.className = "current-change-meta";
+                const heading = document.createElement("strong");
+                heading.textContent = change.cluster;
+                meta.append(heading, ` · ${change.slot}`);
+                const line = document.createElement("div");
+                line.className = "current-change-surface";
+                line.dataset.surfaceKey = change.surfaceKey;
+                line.textContent = `${surfaceLabel(change.surfaceKey)} (material file): `
+                    + `${formatSurfaceValue(change.beforeValue, change.surfaceKey)} → ${formatSurfaceValue(change.afterValue, change.surfaceKey)}`;
+                const scope = document.createElement("div");
+                scope.className = "material-default-scope";
+                scope.textContent = surfaceDefaultScopeText(change.cluster, change.surfaceKey, change.slotIndex, change.editTargets);
+                meta.append(line, scope);
+                const spacer = document.createElement("span");
+                spacer.className = "current-change-picker-spacer";
+                const revertBtn = document.createElement("button");
+                revertBtn.type = "button";
+                revertBtn.className = "secondary-button small-button";
+                revertBtn.textContent = "Revert";
+                revertBtn.addEventListener("click", () => revertMaterialDefaultChange(change));
+                row.append(meta, spacer, revertBtn);
+                groupEl.appendChild(row);
+                continue;
+            }
+
             const meta = document.createElement("div");
             meta.className = "current-change-meta";
             meta.innerHTML =
                 `<strong>${change.cluster}</strong> · ${change.slot}`
-                + `<div class="current-change-hexes">`
-                + `<span class="color-inline"><span class="swatch-inline" style="background:${change.before}"></span>${change.before} <em>(${describeColorName(change.beforeRgba)})</em></span>`
-                + ` → `
-                + `<span class="color-inline"><span class="swatch-inline" style="background:${change.after}"></span>${change.after} <em>(${describeColorName(change.afterRgba)})</em></span>`
-                + `</div>`;
+                + (change.colorChanged === false ? "" : (
+                    `<div class="current-change-hexes">`
+                    + `<span class="color-inline"><span class="swatch-inline" style="background:${change.before}"></span>${change.before} <em>(${describeColorName(change.beforeRgba)})</em></span>`
+                    + ` → `
+                    + `<span class="color-inline"><span class="swatch-inline" style="background:${change.after}"></span>${change.after} <em>(${describeColorName(change.afterRgba)})</em></span>`
+                    + `</div>`
+                ));
+            for (const surfaceChange of change.surfaceChanges ?? []) {
+                const line = document.createElement("div");
+                line.className = "current-change-surface";
+                line.dataset.surfaceKey = surfaceChange.key;
+                line.textContent = describeSurfaceChange(surfaceChange);
+                meta.appendChild(line);
+            }
             if (change.beforeEnabled !== change.afterEnabled) {
                 const activeState = document.createElement("div");
                 activeState.textContent = `Active: ${change.beforeEnabled ? "Yes" : "No"} → ${change.afterEnabled ? "Yes" : "No"}`;
@@ -3723,16 +4123,29 @@ function buildColorStateDocument() {
             costume: state.detectedCostume,
             archiveName: state.importedMod?.sourceName ?? null,
         },
-        materialDefaults: getMaterialDefaultChanges().map(change => ({
-            material: change.cluster,
-            slotIndex: change.slotIndex,
-            rgba: change.afterRgba.slice(),
-            targets: change.editTargets.map(target => ({
-                sourcePath: target.sourcePath, materialIndex: target.materialIndex,
-                originalLinearRgba: originalMaterialDefaultColor(target, change.slotIndex).linearRgba.slice(),
-                linearRgba: target.customizeColors.find(color => color.index === change.slotIndex).linearRgba.slice(),
+        materialDefaults: getMaterialDefaultChanges().map(change => (change.kind === "default-surface"
+            ? {
+                // A Color 1 Blend Rate / Roughness / Metalness kept in the mod MDF.
+                material: change.cluster,
+                slotIndex: change.slotIndex,
+                surface: change.surfaceKey,
+                value: change.afterValue,
+                targets: change.editTargets.map(target => ({
+                    sourcePath: target.sourcePath, materialIndex: target.materialIndex,
+                    originalValue: originalMaterialDefaultScalar(target, change.surfaceKey, change.slotIndex).value,
+                    value: materialDefaultScalar(target, change.surfaceKey, change.slotIndex).value,
+                })),
+            }
+            : {
+                material: change.cluster,
+                slotIndex: change.slotIndex,
+                rgba: change.afterRgba.slice(),
+                targets: change.editTargets.map(target => ({
+                    sourcePath: target.sourcePath, materialIndex: target.materialIndex,
+                    originalLinearRgba: originalMaterialDefaultColor(target, change.slotIndex).linearRgba.slice(),
+                    linearRgba: target.customizeColors.find(color => color.index === change.slotIndex).linearRgba.slice(),
+                })),
             })),
-        })),
         commands: state.cmdEntries.map(cmd => ({
             identity: cmdIdentityKey(cmd.metadata),
             filename: cmd.file.name,
@@ -3754,6 +4167,11 @@ function buildColorStateDocument() {
                     slot.enable?.absoluteOffset,
                     slot.enable?.byteLength,
                 ),
+                // Roughness / Metalness Option fields; null when the slot has none.
+                surface: Object.fromEntries(SURFACE_KEYS.map(key => {
+                    const current = slot.surface?.[key] ? readSurfaceField(cmd.workingBuffer, slot.surface[key]) : null;
+                    return [key, current ? { enabled: current.enabled, value: current.value } : null];
+                })),
             })),
         })),
     };
@@ -3857,10 +4275,44 @@ function validateColorStateDocument(document) {
             if (changesBaseline && slot.materialDefaultTargets?.length) {
                 throw new Error("This saved state enables or overwrites a slot that now uses a shared material default. Edit that default directly and save a new state.");
             }
-            operations.push({ cmd, slot, rgba: rgba.slice(), enabled });
+            const surface = validateSavedSlotSurface(cmd, slot, savedSlot.surface, savedCmd.filename || identity);
+            operations.push({ cmd, slot, rgba: rgba.slice(), enabled, surface });
         }
     }
     return operations;
+}
+
+// States saved before Blend Rate/Roughness/Metalness editing have no `surface`: those
+// slots return to their original surface bytes. New states restore each field.
+function validateSavedSlotSurface(cmd, slot, saved, label) {
+    const baseline = cmdSemanticBaseline(cmd);
+    const result = [];
+    if (saved !== undefined && (saved === null || typeof saved !== "object" || Array.isArray(saved))) {
+        throw new Error(`The color state contains invalid Blend Rate/Roughness/Metalness data in ${label}.`);
+    }
+    for (const key of SURFACE_KEYS) {
+        const field = slot.surface?.[key];
+        const entry = saved?.[key];
+        if (saved !== undefined && entry !== null && entry !== undefined) {
+            if (typeof entry !== "object" || typeof entry.enabled !== "boolean"
+                || typeof entry.value !== "number" || !Number.isFinite(Math.fround(entry.value))) {
+                throw new Error(`The color state contains an invalid ${surfaceLabel(key)} value in ${label}.`);
+            }
+            if (!field) throw new Error(`${label} has a different editable material/slot structure than the loaded CMD.`);
+        }
+        if (!field) continue;
+        const original = readSurfaceField(baseline, field);
+        if (!original) continue;
+        const next = saved === undefined || entry === null || entry === undefined
+            ? original
+            : { enabled: entry.enabled, value: Math.fround(entry.value) };
+        if (!surfaceStatesEqual(original, next)) {
+            const reason = surfaceEditBlockedReason(cmd, slot, key, { activate: next.enabled });
+            if (reason) throw new Error(`${label}: ${reason}`);
+        }
+        result.push({ key, field, state: next, original: next === original });
+    }
+    return result;
 }
 
 function applyColorStateDocument(document) {
@@ -3868,14 +4320,25 @@ function applyColorStateDocument(document) {
     const defaultState = validateMaterialDefaultState(document);
     let changedSlots = 0;
 
-    for (const { cmd, slot, rgba, enabled } of operations) {
+    for (const { cmd, slot, rgba, enabled, surface } of operations) {
         const currentRgba = rgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset);
         const currentEnabled = enabledAtOffset(
             cmd.workingBuffer,
             slot.enable?.absoluteOffset,
             slot.enable?.byteLength,
         );
-        if (!rgbaEquals(currentRgba, rgba) || currentEnabled !== enabled) changedSlots += 1;
+        let surfaceChanged = false;
+        for (const entry of surface ?? []) {
+            const before = readSurfaceField(cmd.workingBuffer, entry.field);
+            if (entry.original) {
+                // Exact original bytes, so an unchanged field stays byte-identical.
+                copySurfaceFieldBytes(cmd.workingBuffer, cmdSemanticBaseline(cmd), entry.field);
+            } else if (!surfaceStatesEqual(before, entry.state)) {
+                writeSurfaceField(cmd.workingBuffer, entry.field, entry.state);
+            }
+            if (!surfaceStatesEqual(before, readSurfaceField(cmd.workingBuffer, entry.field))) surfaceChanged = true;
+        }
+        if (!rgbaEquals(currentRgba, rgba) || currentEnabled !== enabled || surfaceChanged) changedSlots += 1;
 
         writeRgbaAtOffset(cmd.workingBuffer, slot.color.absoluteOffset, rgba);
         updateColorModelAtOffset(cmd, slot.color.absoluteOffset, rgba);
@@ -3916,6 +4379,10 @@ function validateMaterialDefaultState(document) {
     if (!Array.isArray(document.materialDefaults)) throw new Error("The color state is missing its material defaults.");
     const seen = new Set();
     for (const saved of document.materialDefaults) {
+        if (saved?.surface !== undefined) {
+            validateSavedMaterialDefaultScalar(saved, seen, materialBuffers);
+            continue;
+        }
         if (typeof saved?.material !== "string" || !Number.isInteger(saved.slotIndex) || saved.slotIndex < 0
             || !Array.isArray(saved.rgba) || saved.rgba.length !== 4
             || saved.rgba.some(value => !Number.isInteger(value) || value < 0 || value > 255)
@@ -3952,6 +4419,40 @@ function validateMaterialDefaultState(document) {
         }
     }
     return { materialBuffers, slotCount: document.materialDefaults.length };
+}
+
+/** A saved Color 1 Blend Rate / Roughness / Metalness in the mod MDF. */
+function validateSavedMaterialDefaultScalar(saved, seen, materialBuffers) {
+    if (typeof saved.material !== "string" || !Number.isInteger(saved.slotIndex) || saved.slotIndex < 0
+        || !SURFACE_KEYS.includes(saved.surface) || typeof saved.value !== "number" || !Number.isFinite(Math.fround(saved.value))
+        || !Array.isArray(saved.targets) || !saved.targets.length) {
+        throw new Error("The color state contains an invalid material default.");
+    }
+    const key = JSON.stringify([saved.material, saved.surface, saved.slotIndex,
+        saved.targets.map(target => [target?.sourcePath, target?.materialIndex]).sort()]);
+    if (seen.has(key)) throw new Error("The color state contains a duplicate material default.");
+    seen.add(key);
+    for (const savedTarget of saved.targets) {
+        const target = state.materialDefaultTargets.find(target => (
+            target.name === saved.material && target.sourcePath === savedTarget?.sourcePath
+            && target.materialIndex === savedTarget?.materialIndex
+            && materialDefaultScalar(target, saved.surface, saved.slotIndex)
+        ));
+        if (!target) throw new Error("The loaded material files do not match this color state.");
+        const original = originalMaterialDefaultScalar(target, saved.surface, saved.slotIndex);
+        if (!original || !Object.is(Math.fround(original.value), Math.fround(savedTarget.originalValue))) {
+            throw new Error("The original material values differ from this saved state. Load the ZIP used when it was saved.");
+        }
+        const propertyKey = JSON.stringify([target.sourcePath, target.materialIndex, saved.surface, saved.slotIndex]);
+        if (seen.has(propertyKey)) throw new Error("The color state contains overlapping material defaults.");
+        seen.add(propertyKey);
+        const value = typeof savedTarget.value === "number" ? savedTarget.value : saved.value;
+        const record = state.materialDefaultBuffers.get(target.sourcePath);
+        const buffer = materialBuffers.get(target.sourcePath) || record.originalBuffer;
+        const patch = writeMaterialDefaultScalar(buffer, zipEntryBaseName(target.sourcePath), target.name,
+            saved.surface, saved.slotIndex, value, { materialIndex: target.materialIndex });
+        materialBuffers.set(target.sourcePath, patch.buffer);
+    }
 }
 
 async function loadColorStateFile(file) {
@@ -4008,6 +4509,27 @@ function prepareFreecamColorImport(documentData, cmd) {
     const operations = [];
     for (const operation of sourcePlan.operations) {
         try {
+            if (operation.kind === "surface") {
+                const route = surfaceEditRoute(cmd, operation.slot, operation.surfaceKey);
+                if (route.kind === "blocked") throw new Error(route.reason);
+                if (route.kind === "default") {
+                    // Color 1 keeps this setting in the mod MDF: import into that float.
+                    const defaultWrites = route.targets.map(target => {
+                        const record = state.materialDefaultBuffers.get(target.sourcePath);
+                        if (!record) throw new Error("Load the complete mod ZIP to edit this shared material default.");
+                        return { target, ...writeMaterialDefaultScalar(record.workingBuffer, zipEntryBaseName(target.sourcePath),
+                            target.name, operation.surfaceKey, operation.slotIndex, operation.value, { materialIndex: target.materialIndex }) };
+                    });
+                    operations.push({ ...operation, route: "default-surface", defaultWrites,
+                        beforeDefaultValue: materialDefaultScalar(route.targets[0], operation.surfaceKey, operation.slotIndex)?.value,
+                        changed: defaultWrites.some(write => write.changed) });
+                    continue;
+                }
+                const reason = surfaceEditBlockedReason(cmd, operation.slot, operation.surfaceKey, { activate: true });
+                if (reason) throw new Error(reason);
+                operations.push({ ...operation, route: "surface" });
+                continue;
+            }
             if (operation.slot.materialEditBlockedReason) throw new Error(operation.slot.materialEditBlockedReason);
             if (!operation.slot.materialDefaultTargets?.length) {
                 planColorSlotEdit(cmd, operation.slot, operation.rgba);
@@ -4030,7 +4552,7 @@ function prepareFreecamColorImport(documentData, cmd) {
         }
     }
     const conflicts = new Set();
-    const defaultOperations = operations.filter(operation => operation.route === "default");
+    const defaultOperations = operations.filter(operation => operation.route === "default" || operation.route === "default-surface");
     for (let i = 0; i < defaultOperations.length; i += 1) for (let j = i + 1; j < defaultOperations.length; j += 1) {
         const left = defaultOperations[i];
         const right = defaultOperations[j];
@@ -4044,22 +4566,28 @@ function prepareFreecamColorImport(documentData, cmd) {
             if (aBytes.some((value, index) => value !== bBytes[index])) { conflicts.add(left); conflicts.add(right); }
         }
     }
-    for (const operation of conflicts) issues.push({ ...operation, reason: "Conflicting imported colors overlap the same material default." });
+    for (const operation of conflicts) issues.push({ ...operation, reason: "Conflicting imported values overlap the same material default." });
     const supported = operations.filter(operation => !conflicts.has(operation));
     const cmdBuffer = cmd.workingBuffer.slice(0);
     const materialBuffers = new Map();
     const materialBeforeBuffers = new Map();
     for (const operation of supported) {
-        if (operation.route === "default") {
+        if (operation.route === "surface") {
+            if (operation.changed) writeSurfaceBytes(cmdBuffer, operation.field, { enabled: true, value: operation.value });
+            continue;
+        }
+        if (operation.route === "default" || operation.route === "default-surface") {
             for (const write of operation.defaultWrites) {
                 const { target } = write;
                 const record = state.materialDefaultBuffers.get(target.sourcePath);
                 if (!materialBeforeBuffers.has(target.sourcePath)) materialBeforeBuffers.set(target.sourcePath, record.workingBuffer.slice(0));
                 if (!operation.changed) continue;
                 const buffer = materialBuffers.get(target.sourcePath) || record.workingBuffer;
-                materialBuffers.set(target.sourcePath, writeMaterialDefaultLinearColor(buffer,
-                    zipEntryBaseName(target.sourcePath), target.name, operation.slotIndex, operation.linearRgba,
-                    { materialIndex: target.materialIndex }).buffer);
+                materialBuffers.set(target.sourcePath, (operation.route === "default-surface"
+                    ? writeMaterialDefaultScalar(buffer, zipEntryBaseName(target.sourcePath), target.name,
+                        operation.surfaceKey, operation.slotIndex, operation.value, { materialIndex: target.materialIndex })
+                    : writeMaterialDefaultLinearColor(buffer, zipEntryBaseName(target.sourcePath), target.name,
+                        operation.slotIndex, operation.linearRgba, { materialIndex: target.materialIndex })).buffer);
             }
         } else if (operation.changed) {
             writeRgbaAtOffset(cmdBuffer, operation.slot.color.absoluteOffset, operation.rgba);
@@ -4099,9 +4627,10 @@ function previewFreecamColors() {
     freecamPreview.append(title);
     const changed = plan.operations.filter(operation => operation.changed);
     const summary = document.createElement("p");
-    const defaults = changed.filter(operation => operation.route === "default").length;
-    const cmdColors = changed.length - defaults;
-    summary.textContent = `${cmdColors} CMD color${cmdColors === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
+    const defaults = changed.filter(operation => operation.route === "default" || operation.route === "default-surface").length;
+    const surfaces = changed.filter(operation => operation.route === "surface").length;
+    const cmdColors = changed.length - defaults - surfaces;
+    summary.textContent = `${cmdColors} CMD color${cmdColors === 1 ? "" : "s"}, ${surfaces} Blend Rate/Roughness/Metalness setting${surfaces === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
         + (plan.duplicates ? ` ${plan.duplicates} identical mesh duplicates combined.` : "")
         + (documentData.skippedFields ? ` The export omitted ${documentData.skippedFields} unsupported or out-of-range fields.` : "");
     freecamPreview.append(summary);
@@ -4112,7 +4641,7 @@ function previewFreecamColors() {
         table.className = "freecam-preview-table";
         const head = document.createElement("thead");
         const headings = document.createElement("tr");
-        for (const label of ["Material / slot", "Current color", "Imported color", "Destination"]) {
+        for (const label of ["Material / slot", "Current", "Imported", "Destination"]) {
             const cell = document.createElement("th");
             cell.scope = "col";
             cell.textContent = label;
@@ -4125,10 +4654,31 @@ function previewFreecamColors() {
             row.dataset.freecamRoute = operation.route;
             const name = document.createElement("td");
             name.textContent = `${operation.material} / ${operation.parameter}`;
-            row.append(name, freecamColorCell(operation.beforeRgba, operation.beforeEnabled), freecamColorCell(operation.rgba));
+            if (operation.route === "default-surface") {
+                const before = document.createElement("td");
+                before.textContent = `${surfaceLabel(operation.surfaceKey)} ${formatSurfaceValue(operation.beforeDefaultValue, operation.surfaceKey)} (material file)`;
+                const after = document.createElement("td");
+                after.textContent = `${surfaceLabel(operation.surfaceKey)} ${formatSurfaceValue(operation.value, operation.surfaceKey)}`;
+                row.append(name, before, after);
+            } else if (operation.route === "surface") {
+                const before = document.createElement("td");
+                before.textContent = `${surfaceLabel(operation.surfaceKey)} ${formatSurfaceState(operation.beforeSurface, operation.surfaceKey)}`;
+                const after = document.createElement("td");
+                after.textContent = `${surfaceLabel(operation.surfaceKey)} ${formatSurfaceValue(operation.value, operation.surfaceKey)}`;
+                row.append(name, before, after);
+            } else {
+                row.append(name, freecamColorCell(operation.beforeRgba, operation.beforeEnabled), freecamColorCell(operation.rgba));
+            }
             const destination = document.createElement("td");
-            destination.textContent = operation.route === "default" ? "Shared material default" : cmdDisplayName(cmd);
-            if (operation.route === "default") {
+            const isDefault = operation.route === "default" || operation.route === "default-surface";
+            destination.textContent = isDefault ? "Shared material default" : cmdDisplayName(cmd);
+            if (operation.route === "default-surface") {
+                const scope = document.createElement("p");
+                scope.className = "material-default-scope";
+                scope.textContent = surfaceDefaultScopeText(operation.material, operation.surfaceKey, operation.slotIndex,
+                    operation.defaultWrites.map(write => write.target));
+                destination.appendChild(scope);
+            } else if (operation.route === "default") {
                 const scope = document.createElement("p");
                 scope.className = "material-default-scope";
                 scope.textContent = materialDefaultScopeText(operation.material, operation.slotIndex,
@@ -4193,6 +4743,7 @@ function applyFreecamColors() {
     const beforeMaterialBuffers = new Map([...plan.materialBuffers].map(([path]) => [path, state.materialDefaultBuffers.get(path).workingBuffer.slice(0)]));
     cmd.workingBuffer = plan.cmdBuffer;
     for (const [path, buffer] of plan.materialBuffers) state.materialDefaultBuffers.get(path).workingBuffer = buffer;
+    syncSurfaceModels(cmd.workingBuffer, cmd.colorClusters);
     for (const operation of operations) {
         if (operation.route === "cmd") {
             updateColorModelAtOffset(cmd, operation.slot.color.absoluteOffset, operation.rgba);
@@ -4209,9 +4760,10 @@ function applyFreecamColors() {
     state.inspectorDirty = true;
     resetFreecamPreview();
     refreshAfterFreecamImport();
-    const defaults = operations.filter(operation => operation.route === "default").length;
-    const cmdColors = operations.length - defaults;
-    showStatus(freecamStatus, "good", `Applied ${cmdColors} CMD color${cmdColors === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"}. `
+    const defaults = operations.filter(operation => operation.route === "default" || operation.route === "default-surface").length;
+    const surfaces = operations.filter(operation => operation.route === "surface").length;
+    const cmdColors = operations.length - defaults - surfaces;
+    showStatus(freecamStatus, "good", `Applied ${cmdColors} CMD color${cmdColors === 1 ? "" : "s"}, ${surfaces} Blend Rate/Roughness/Metalness setting${surfaces === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"}. `
         + (defaults ? "Build a mod ZIP to save the material defaults." : "Export the CMD or mod ZIP to save them.")
         + (plan.issues.length ? ` ${plan.issues.length} unsupported match${plan.issues.length === 1 ? " was" : "es were"} skipped.` : ""));
 }
@@ -4226,10 +4778,12 @@ function undoFreecamColors() {
     new Uint8Array(undo.cmd.workingBuffer).set(new Uint8Array(undo.beforeBuffer));
     for (const [path, buffer] of undo.beforeMaterialBuffers) state.materialDefaultBuffers.get(path).workingBuffer = buffer.slice(0);
     for (const slot of undo.slots) {
+        if (!slot.color) continue;
         updateColorModelAtOffset(undo.cmd, slot.color.absoluteOffset, rgbaAtOffset(undo.beforeBuffer, slot.color.absoluteOffset));
         const enabled = enabledAtOffset(undo.beforeBuffer, slot.enable?.absoluteOffset, slot.enable?.byteLength);
         if (enabled !== null) { slot.enabled = enabled; slot.enable.value = enabled; }
     }
+    syncSurfaceModels(undo.cmd.workingBuffer, undo.cmd.colorClusters);
     refreshMaterialDefaultTargets();
     attachMaterialDefaultEditMetadata();
     recomputeInspectorDirty();
@@ -4272,7 +4826,9 @@ function generateColorString() {
     colorStringOutput.scrollLeft = 0;
     colorStringExport = { cmd, clusters: cmd.colorClusters, buffer: cmd.workingBuffer.slice(0) };
     showStatus(colorStringStatus, result.skippedSlots ? "warn" : "good",
-        `Ready: ${result.slotCount} active color slot${result.slotCount === 1 ? "" : "s"} from ${cmdDisplayName(cmd)}.`
+        `Ready: ${result.slotCount} active color slot${result.slotCount === 1 ? "" : "s"}`
+        + (result.surfaceCount ? ` and ${result.surfaceCount} edited Blend Rate/Roughness/Metalness setting${result.surfaceCount === 1 ? "" : "s"}` : "")
+        + ` from ${cmdDisplayName(cmd)}.`
         + (result.inactiveSlots ? ` ${result.inactiveSlots} inactive slot${result.inactiveSlots === 1 ? " was" : "s were"} omitted.` : "")
         + (result.skippedSlots ? ` ${result.skippedSlots} unsupported slot${result.skippedSlots === 1 ? " was" : "s were"} skipped.` : ""));
     return result;
@@ -4321,8 +4877,11 @@ function semanticChangesSince(cmd, baseline) {
         const afterRgba = rgbaAtOffset(cmd.workingBuffer, offset);
         const beforeEnabled = enabledAtOffset(colorBaseline, slot.enable?.absoluteOffset, slot.enable?.byteLength);
         const afterEnabled = enabledAtOffset(cmd.workingBuffer, slot.enable?.absoluteOffset, slot.enable?.byteLength);
-        if (!rgbaEquals(beforeRgba, afterRgba) || beforeEnabled !== afterEnabled) {
-            changes.push({ cluster: cluster.name, slot: slot.runtimeName, beforeRgba, afterRgba, beforeEnabled, afterEnabled });
+        const surfaceChanges = colorBaseline.byteLength === cmd.workingBuffer.byteLength
+            ? slotSurfaceChanges(colorBaseline, cmd.workingBuffer, slot)
+            : [];
+        if (!rgbaEquals(beforeRgba, afterRgba) || beforeEnabled !== afterEnabled || surfaceChanges.length) {
+            changes.push({ cluster: cluster.name, slot: slot.runtimeName, beforeRgba, afterRgba, beforeEnabled, afterEnabled, surfaceChanges });
         }
     }
     return changes;
@@ -4333,8 +4892,12 @@ function buildExportChangelog(changedCmds) {
     for (const { cmd, changes } of changedCmds) {
         lines.push(`${cmdDisplayName(cmd)}: ${cmd.file.name}`);
         for (const change of changes) {
-            lines.push(`- ${change.cluster} · ${change.slot}: ${describeColorName(change.beforeRgba)} ${rgbaToHexString(change.beforeRgba)} → ${describeColorName(change.afterRgba)} ${rgbaToHexString(change.afterRgba)}`);
+            const colorChanged = !rgbaEquals(change.beforeRgba, change.afterRgba) || change.beforeEnabled !== change.afterEnabled;
+            lines.push(colorChanged
+                ? `- ${change.cluster} · ${change.slot}: ${describeColorName(change.beforeRgba)} ${rgbaToHexString(change.beforeRgba)} → ${describeColorName(change.afterRgba)} ${rgbaToHexString(change.afterRgba)}`
+                : `- ${change.cluster} · ${change.slot}`);
             if (change.beforeEnabled !== change.afterEnabled) lines.push(`  Active: ${change.beforeEnabled ? "Yes" : "No"} → ${change.afterEnabled ? "Yes" : "No"}`);
+            for (const surfaceChange of change.surfaceChanges ?? []) lines.push(`  ${describeSurfaceChange(surfaceChange)}`);
         }
         lines.push("");
     }
@@ -4347,6 +4910,12 @@ function buildExportChangelog(changedCmds) {
             if (rgbaEquals(before.cmdRgba, color.cmdRgba)) continue;
             lines.push(`Shared material default: ${target.sourcePath}`,
                 `- ${target.name} · CustomizeColor_${color.index}: ${rgbaToHexString(before.cmdRgba)} → ${rgbaToHexString(color.cmdRgba)}`, "");
+        }
+        for (const scalar of target.customizeScalars ?? []) {
+            const before = materialDefaultScalar(baseline, scalar.key, scalar.index);
+            if (!before || Object.is(Math.fround(before.value), Math.fround(scalar.value))) continue;
+            lines.push(`Shared material default: ${target.sourcePath}`,
+                `- ${target.name} · ${scalar.parameter}: ${formatSurfaceValue(before.value, scalar.key)} → ${formatSurfaceValue(scalar.value, scalar.key)}`, "");
         }
     }
     return new TextEncoder().encode(`${lines.join("\n")}\n`);
@@ -5076,6 +5645,16 @@ function bindColorPickerEvents() {
         syncPickerFromRgba(rgba);
         emitPickerChange();
     });
+    // Apply as soon as the field holds a complete #RRGGBB or #RRGGBBAA (typed or
+    // pasted), without rewriting the text being edited. Enter/blur still normalize it.
+    colorPickerHex?.addEventListener("input", () => {
+        const text = colorPickerHex.value.trim();
+        if (!/^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(text)) return;
+        const rgba = parseRgbaHex(text);
+        if (!rgba || rgbaEquals(rgba, colorPickerState.rgba)) return;
+        syncPickerFromRgba(rgba, { skipHex: true });
+        emitPickerChange();
+    });
 
     colorPickerRuntimePaste?.addEventListener("click", async () => {
         let succeeded = false;
@@ -5108,11 +5687,14 @@ function bindColorPickerEvents() {
         // Let a left-click on the opening swatch reach its click handler so it
         // toggles the picker. Right-clicking that swatch dismisses immediately.
         if (e.button === 0 && colorPickerState.anchor?.contains?.(e.target)) return;
-        closeCustomColorPicker();
+        // Shift/Ctrl presses and drags on the 3D preview move its camera and keep the picker open.
+        dismissUnlessPreviewCamera(e, closeCustomColorPicker);
     });
 
     document.addEventListener("contextmenu", e => {
         if (!colorPickerState.open || customColorPicker.contains(e.target)) return;
+        // Right drag pans the 3D preview (and Ctrl+click is a right click on a Mac).
+        if (isPreviewCanvas(e.target)) return;
         closeCustomColorPicker();
     });
 
@@ -5736,6 +6318,15 @@ async function restoreColorBackup(snapshotId) {
         for (const cluster of target.cmd.colorClusters) for (const slot of cmdColorSlots(cluster)) {
             const restoredCluster = restored.colorClusters.find(candidate => candidate.instanceId === cluster.instanceId && candidate.name === cluster.name);
             const restoredSlot = restoredCluster?.colors.find(candidate => candidate.index === slot.index);
+            if (slot.surfaceDefaultLocked && restoredSlot) {
+                for (const key of SURFACE_KEYS) {
+                    const before = readSurfaceField(cmdSemanticBaseline(target.cmd), slot.surface?.[key]);
+                    const after = readSurfaceField(restored.workingBuffer, restoredSlot.surface?.[key]);
+                    if (before && after && !before.enabled && after.enabled) {
+                        throw new Error(`This backup turns on a ${surfaceLabel(key)} setting that Color 1 keeps in the mod's material file. Restore a backup made with the current tool.`);
+                    }
+                }
+            }
             if (!slot.materialDefaultTargets?.length && !slot.materialEditBlockedReason) continue;
             if (!restoredSlot) throw new Error("This older backup changes a guarded material's structure. Restore a backup made with the current tool.");
             const restoredParts = restored.instanceParse.parsedInstances.filter(instance => (
@@ -6715,7 +7306,7 @@ function bindSurpriseMenuEvents() {
         if (!surpriseMenuState.open) return;
         if (surpriseMenu?.contains(event.target)) return;
         if (event.target.closest?.(".cluster-surprise-settings")) return;
-        closeSurpriseMenu();
+        dismissUnlessPreviewCamera(event, closeSurpriseMenu);
     });
     window.addEventListener("resize", () => {
         if (surpriseMenuState.open) positionSurpriseMenu(surpriseMenuState.anchor);
@@ -6731,6 +7322,419 @@ function bindSurpriseMenuEvents() {
             closeSurpriseMenu();
         }
     });
+}
+
+// Presses on the 3D preview canvas. Shift/Ctrl/Cmd presses, right/middle
+// presses and any drag move the camera, so they must not dismiss an open color
+// picker, Surprise Me menu or surface pop-up. A plain, still left click picks a
+// part and dismisses them as before.
+const previewCanvasGesture = { pressed: false, camera: false, moved: false, startX: 0, startY: 0 };
+
+function isPreviewCanvas(target) {
+    return Boolean(target?.closest?.("#browser-preview canvas"));
+}
+
+document.addEventListener("pointerdown", event => {
+    if (!isPreviewCanvas(event.target)) return;
+    Object.assign(previewCanvasGesture, {
+        pressed: true, moved: false, startX: event.clientX, startY: event.clientY,
+        camera: event.shiftKey || event.ctrlKey || event.metaKey || event.button !== 0,
+    });
+}, true);
+document.addEventListener("pointermove", event => {
+    if (!previewCanvasGesture.pressed || previewCanvasGesture.moved) return;
+    if (Math.hypot(event.clientX - previewCanvasGesture.startX, event.clientY - previewCanvasGesture.startY) >= 4) {
+        previewCanvasGesture.moved = true;
+    }
+}, true);
+for (const type of ["pointerup", "pointercancel"]) {
+    window.addEventListener(type, () => { previewCanvasGesture.pressed = false; });
+}
+
+const previewCanvasPicked = () => !previewCanvasGesture.camera && !previewCanvasGesture.moved;
+
+/** Dismiss for an outside press, except camera gestures on the 3D preview. */
+function dismissUnlessPreviewCamera(event, close) {
+    if (!isPreviewCanvas(event.target)) {
+        close();
+        return;
+    }
+    if (event.type === "click" || event.type === "pointerup") {
+        if (previewCanvasPicked()) close();
+        return;
+    }
+    // A pointerdown: wait until the gesture ends to know whether it was a pick.
+    const finish = end => {
+        window.removeEventListener("pointerup", finish, true);
+        window.removeEventListener("pointercancel", finish, true);
+        if (end.type === "pointerup" && previewCanvasPicked()) close();
+    };
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
+}
+
+// Blend Rate / Roughness / Metalness controls open in one shared pop-up
+// anchored to the slot's icon, so material rows never change height.
+const SURFACE_SCALE_LABELS = {
+    blendRate: ["None", "Full"],
+    roughness: ["Glossier", "Rougher"],
+    metalness: ["Less metal", "More metal"],
+};
+
+const surfacePopover = document.querySelector("#surface-popover");
+const surfacePopoverBody = document.querySelector("#surface-popover-body");
+const surfacePopoverSlotLabel = document.querySelector("#surface-popover-slot");
+const surfacePopoverClose = document.querySelector("#surface-popover-close");
+const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null };
+
+function surfaceToggleKey(cluster, slot) {
+    return `${cluster.instanceId}|${slot.index}`;
+}
+
+function positionSurfacePopover() {
+    const anchor = surfacePopoverState.anchor;
+    if (!surfacePopover || !anchor?.isConnected) return;
+    const pad = 10;
+    const gap = 8;
+    const rect = anchor.getBoundingClientRect();
+    const width = surfacePopover.offsetWidth || 480;
+    const height = surfacePopover.offsetHeight || 360;
+    let left = rect.right - width;
+    let top = rect.bottom + gap;
+    const fitsBelow = top + height <= window.innerHeight - pad;
+    const fitsAbove = rect.top - height - gap >= pad;
+    if (!fitsBelow && fitsAbove) top = rect.top - height - gap;
+    else if (!fitsBelow && rect.left - width - gap >= pad) {
+        // Neither above nor below fits: sit beside the icon instead of covering it.
+        left = rect.left - width - gap;
+        top = rect.top + rect.height / 2 - height / 2;
+    }
+    left = Math.min(window.innerWidth - width - pad, Math.max(pad, left));
+    top = Math.min(window.innerHeight - height - pad, Math.max(pad, top));
+    surfacePopover.style.left = `${left}px`;
+    surfacePopover.style.top = `${top}px`;
+}
+
+function closeSurfacePopover({ restoreFocus = false } = {}) {
+    if (!surfacePopoverState.open) return;
+    const { anchor, cmd, slot } = surfacePopoverState;
+    Object.assign(surfacePopoverState, { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null });
+    surfacePopover?.classList.add("hidden");
+    surfacePopoverBody?.replaceChildren();
+    if (anchor) {
+        anchor.setAttribute("aria-expanded", "false");
+        if (cmd && slot) updateSurfaceToggle(anchor, cmd, slot);
+        if (restoreFocus && anchor.isConnected) anchor.focus();
+    }
+}
+
+function showSurfacePopover(anchor, cmd, cluster, slot) {
+    surfacePopoverState.anchor?.setAttribute("aria-expanded", "false");
+    Object.assign(surfacePopoverState, {
+        open: true, anchor, cmd, slot, clusterInstanceId: cluster.instanceId, slotIndex: slot.index,
+    });
+    anchor.setAttribute("aria-expanded", "true");
+    if (surfacePopoverSlotLabel) surfacePopoverSlotLabel.textContent = `${cluster.name} · ${slot.runtimeName} · ${cmdDisplayName(cmd)}`;
+    surfacePopover?.classList.remove("hidden");
+    renderSlotSurfacePanel(surfacePopoverBody, cmd, slot, anchor);
+    updateSurfaceToggle(anchor, cmd, slot);
+    positionSurfacePopover();
+}
+
+function openSurfacePopover(anchor, cmd, cluster, slot) {
+    if (surfacePopoverState.open && surfacePopoverState.anchor === anchor) {
+        closeSurfacePopover();
+        return;
+    }
+    if (surpriseMenuState.open) closeSurpriseMenu();
+    closeCustomColorPicker();
+    showSurfacePopover(anchor, cmd, cluster, slot);
+    surfacePopoverBody?.querySelector("input:not(:disabled)")?.focus({ preventScroll: true });
+}
+
+// The material list re-renders after many edits. Keep the pop-up on the same
+// slot when its new icon exists; otherwise close it.
+function reattachSurfacePopover() {
+    if (!surfacePopoverState.open) return;
+    const cmd = state.cmdEntries[state.activeCmdIndex];
+    const key = `${surfacePopoverState.clusterInstanceId}|${surfacePopoverState.slotIndex}`;
+    const anchor = clusterInspector?.querySelector(`.cluster-slot-surface-toggle[data-surface-slot="${key}"]`);
+    const cluster = cmd?.colorClusters.find(candidate => candidate.instanceId === surfacePopoverState.clusterInstanceId);
+    const slot = cluster?.colors.find(candidate => candidate.index === surfacePopoverState.slotIndex);
+    if (cmd !== surfacePopoverState.cmd || !anchor || !slot || !anchor.closest("details")?.open) {
+        closeSurfacePopover();
+        return;
+    }
+    showSurfacePopover(anchor, cmd, cluster, slot);
+}
+
+function bindSurfacePopover() {
+    surfacePopoverClose?.addEventListener("click", () => closeSurfacePopover({ restoreFocus: true }));
+    document.addEventListener("pointerdown", event => {
+        if (!surfacePopoverState.open) return;
+        if (surfacePopover?.contains(event.target)) return;
+        if (event.target.closest?.(".cluster-slot-surface-toggle")) return;
+        dismissUnlessPreviewCamera(event, () => closeSurfacePopover());
+    });
+    window.addEventListener("keydown", event => {
+        if (event.key !== "Escape" || !surfacePopoverState.open) return;
+        event.preventDefault();
+        closeSurfacePopover({ restoreFocus: true });
+    });
+    window.addEventListener("resize", () => { if (surfacePopoverState.open) positionSurfacePopover(); });
+    window.addEventListener("scroll", () => { if (surfacePopoverState.open) positionSurfacePopover(); }, { passive: true, capture: true });
+}
+
+// A Color 1 setting kept in the mod MDF: its current and original float.
+function surfaceDefaultValues(cmd, slot, key) {
+    const route = surfaceEditRoute(cmd, slot, key);
+    if (route.kind !== "default") return null;
+    const current = materialDefaultScalar(route.targets[0], key, slot.index);
+    const original = originalMaterialDefaultScalar(route.targets[0], key, slot.index);
+    if (!current) return null;
+    const edited = route.targets.some(target => {
+        const now = materialDefaultScalar(target, key, slot.index);
+        const before = originalMaterialDefaultScalar(target, key, slot.index);
+        return now && before && !Object.is(Math.fround(now.value), Math.fround(before.value));
+    });
+    return { targets: route.targets, value: current.value, original: original?.value ?? current.value, edited };
+}
+
+function surfaceSummaryParts(cmd, slot) {
+    return SURFACE_KEYS.flatMap(key => {
+        const defaults = surfaceDefaultValues(cmd, slot, key);
+        if (defaults) return defaults.edited ? [`${surfaceLabel(key)} ${formatSurfaceValue(defaults.value, key)} (material file)`] : [];
+        const field = slot.surface?.[key];
+        const current = field ? readSurfaceField(cmd.workingBuffer, field) : null;
+        return current?.enabled ? [`${surfaceLabel(key)} ${formatSurfaceValue(current.value, key)}`] : [];
+    });
+}
+
+function updateSurfaceToggle(button, cmd, slot) {
+    const parts = surfaceSummaryParts(cmd, slot);
+    button.classList.toggle("has-surface", parts.length > 0);
+    const baseline = cmdSemanticBaseline(cmd);
+    button.classList.toggle("is-edited", SURFACE_KEYS.some(key => (
+        (slot.surface?.[key] && surfaceFieldBytesDiffer(baseline, cmd.workingBuffer, slot.surface[key]))
+        || surfaceDefaultValues(cmd, slot, key)?.edited
+    )));
+    const summary = parts.length ? parts.join(" · ") : "Blend Rate, Roughness and Metalness use the material defaults";
+    button.title = `${summary}. Click to ${button.getAttribute("aria-expanded") === "true" ? "hide" : "edit"} blend rate, roughness and metalness.`;
+    button.setAttribute("aria-label", `Blend rate, roughness and metalness for ${slot.runtimeName}: ${summary}`);
+}
+
+// Fill from the "no change" point: 0 for the signed offsets, the left end for Blend Rate.
+function surfaceSliderFill(range) {
+    const min = Number(range.min);
+    const max = Number(range.max);
+    const toPercent = value => ((value - min) / (max - min)) * 100;
+    const zero = toPercent(Math.max(min, Math.min(max, 0)));
+    const percent = toPercent(Number(range.value));
+    range.style.setProperty("--from", `${Math.min(zero, percent)}%`);
+    range.style.setProperty("--to", `${Math.max(zero, percent)}%`);
+}
+
+function commitSurfaceEdit() {
+    recomputeInspectorDirty();
+    updateInspectorDirtyUi();
+    renderCurrentChanges();
+    renderSyncPanels();
+    updateExportButtons();
+}
+
+const SURFACE_PANEL_HELP = "Blend Rate sets how strongly this slot's color is applied (the material default is usually 1). Roughness and Metalness are added to the material's own values; 0 changes nothing. Turn a setting off to use the material default.";
+
+function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
+    panel.replaceChildren();
+    const baselineBuffer = cmdSemanticBaseline(cmd);
+    const reasons = new Set();
+    const defaultKeys = [];
+
+    for (const key of SURFACE_KEYS) {
+        const label = surfaceLabel(key);
+        const field = slot.surface?.[key];
+        const route = surfaceEditRoute(cmd, slot, key);
+        const isDefault = route.kind === "default";
+        if (isDefault) defaultKeys.push(key);
+        const current = field ? readSurfaceField(cmd.workingBuffer, field) : null;
+        const baseline = field ? readSurfaceField(baselineBuffer, field) : null;
+        const defaults = isDefault ? surfaceDefaultValues(cmd, slot, key) : null;
+        let reason = null;
+        if (route.kind === "blocked") reason = route.reason;
+        else if (!isDefault) reason = surfaceEditBlockedReason(cmd, slot, key, { activate: !current?.enabled });
+        if (!current && !reason) reason = `This slot has no ${label} setting.`;
+        if (reason) reasons.add(reason);
+        const editable = isDefault ? Boolean(defaults) : Boolean(current) && !reason;
+        const shownValue = isDefault ? defaults?.value : current?.value;
+
+        const line = document.createElement("div");
+        line.className = "surface-field";
+        line.dataset.surfaceKey = key;
+        line.dataset.surfaceRoute = route.kind;
+        line.classList.toggle("is-off", !isDefault && !current?.enabled);
+
+        const switchLabel = document.createElement("label");
+        switchLabel.className = "surface-field-switch";
+        const enabledInput = document.createElement("input");
+        enabledInput.type = "checkbox";
+        enabledInput.checked = Boolean(current?.enabled);
+        enabledInput.disabled = isDefault || !editable;
+        enabledInput.hidden = isDefault;
+        enabledInput.setAttribute("aria-label", `Override ${label} for ${slot.runtimeName}`);
+        const name = document.createElement("span");
+        name.className = "surface-field-name";
+        name.textContent = label;
+        const runtime = document.createElement("span");
+        runtime.className = "surface-field-runtime";
+        runtime.textContent = surfaceRuntimeName(key, slot.index);
+        switchLabel.append(enabledInput, name, runtime);
+
+        const sliderWrap = document.createElement("div");
+        sliderWrap.className = "surface-field-slider";
+        const range = document.createElement("input");
+        range.type = "range";
+        const { min, max } = surfaceRange(key);
+        range.min = String(min);
+        range.max = String(max);
+        range.step = "0.01";
+        range.value = String(clampSurfaceValue(shownValue ?? 0, key));
+        range.disabled = !editable;
+        range.setAttribute("aria-label", `${label} for ${slot.runtimeName}`);
+        surfaceSliderFill(range);
+        const scale = document.createElement("div");
+        scale.className = "surface-field-scale";
+        const [low, high] = SURFACE_SCALE_LABELS[key];
+        const marks = key === "blendRate" ? [`${low} 0`, "0.5", `1 ${high}`] : [`${low} −1`, "0", `+1 ${high}`];
+        for (const text of marks) {
+            const mark = document.createElement("span");
+            mark.textContent = text;
+            scale.appendChild(mark);
+        }
+        sliderWrap.append(range, scale);
+
+        const number = document.createElement("input");
+        number.type = "number";
+        number.className = "surface-field-number";
+        number.min = String(min);
+        number.max = String(max);
+        number.step = "0.01";
+        number.value = typeof shownValue === "number" ? String(Math.round(shownValue * 100) / 100) : "";
+        number.disabled = !editable;
+        number.setAttribute("aria-label", `${label} value for ${slot.runtimeName}`);
+
+        const status = document.createElement("span");
+        status.className = "surface-field-status";
+        status.textContent = isDefault ? "Material file" : (current?.enabled ? "Override" : "Material default");
+        if (isDefault) status.title = "Color 1 keeps this setting off in the CMD. This value is the mod's material file default.";
+
+        const reset = document.createElement("button");
+        reset.type = "button";
+        reset.className = "secondary-button small-button surface-field-reset";
+        reset.textContent = "Original";
+        reset.title = isDefault
+            ? `Restore the material file's original ${label}: ${formatSurfaceValue(defaults?.original, key)}`
+            : (baseline ? `Restore the original ${label}: ${formatSurfaceState(baseline, key)}` : `Restore the original ${label}`);
+        reset.disabled = isDefault ? !defaults?.edited : (!field || !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field));
+
+        const write = next => {
+            try {
+                setSlotSurface(cmd, slot, key, next);
+            } catch (error) {
+                showStatus(parserStatus, "bad", error.message || String(error));
+                return false;
+            }
+            if (isDefault) {
+                reset.disabled = !surfaceDefaultValues(cmd, slot, key)?.edited;
+            } else {
+                const after = readSurfaceField(cmd.workingBuffer, field);
+                enabledInput.checked = after.enabled;
+                line.classList.toggle("is-off", !after.enabled);
+                status.textContent = after.enabled ? "Override" : "Material default";
+                reset.disabled = !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field);
+            }
+            updateSurfaceToggle(surfacePopoverState.anchor ?? toggle, cmd, slot);
+            return true;
+        };
+        const rerender = () => {
+            commitSurfaceEdit();
+            // Edits can re-render the material list; follow the current icon.
+            if (surfacePopoverState.open && surfacePopoverState.slot === slot) {
+                renderSlotSurfacePanel(panel, cmd, slot, surfacePopoverState.anchor ?? toggle);
+                positionSurfacePopover();
+            }
+        };
+
+        enabledInput.addEventListener("change", () => {
+            write({ enabled: enabledInput.checked });
+            rerender();
+        });
+        range.addEventListener("input", () => {
+            const value = clampSurfaceValue(range.value, key);
+            surfaceSliderFill(range);
+            number.value = String(Math.round(value * 100) / 100);
+            write({ enabled: true, value });
+        });
+        range.addEventListener("change", rerender);
+        number.addEventListener("change", () => {
+            const parsed = Number(number.value);
+            if (number.value.trim() === "" || !Number.isFinite(parsed)) {
+                number.classList.add("invalid");
+                return;
+            }
+            number.classList.remove("invalid");
+            const value = clampSurfaceValue(parsed, key);
+            if (write({ enabled: true, value })) rerender();
+        });
+        reset.addEventListener("click", () => {
+            const changed = isDefault
+                ? revertSurfaceDefault(slot, key, surfaceEditRoute(cmd, slot, key).targets ?? [])
+                : copySurfaceFieldBytes(cmd.workingBuffer, baselineBuffer, field);
+            if (!changed) return;
+            updateSurfaceToggle(surfacePopoverState.anchor ?? toggle, cmd, slot);
+            rerender();
+        });
+
+        line.append(switchLabel, sliderWrap, number, status, reset);
+        panel.appendChild(line);
+    }
+
+    const notes = [];
+    if (defaultKeys.length) {
+        const route = surfaceEditRoute(cmd, slot, defaultKeys[0]);
+        notes.push({
+            text: `Color 1 keeps ${defaultKeys.map(surfaceLabel).join(", ")} in the mod's material file, so edits change that file. `
+                + surfaceDefaultScopeText(slot.materialName, defaultKeys[0], slot.index, route.targets ?? []),
+            cls: "is-default",
+        });
+    }
+    for (const reason of reasons) notes.push({ text: reason, cls: "is-blocked" });
+    if (!notes.length) notes.push({ text: SURFACE_PANEL_HELP, cls: "" });
+    for (const { text, cls } of notes) {
+        const note = document.createElement("p");
+        note.className = `surface-note ${cls}`.trim();
+        note.textContent = text;
+        panel.appendChild(note);
+    }
+}
+
+function createSlotSurfaceControls(cmd, cluster, slot) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "cluster-slot-surface-toggle";
+    toggle.dataset.parameter = slot.runtimeName;
+    toggle.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 6h8M15 6h2M3 14h2M9 14h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="13" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="7" cy="14" r="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
+    if (!slot.surface) {
+        toggle.disabled = true;
+        toggle.title = "This slot has no Blend Rate, Roughness or Metalness settings.";
+        return toggle;
+    }
+    toggle.dataset.surfaceSlot = surfaceToggleKey(cluster, slot);
+    toggle.setAttribute("aria-haspopup", "dialog");
+    toggle.setAttribute("aria-controls", "surface-popover");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => openSurfacePopover(toggle, cmd, cluster, slot));
+    updateSurfaceToggle(toggle, cmd, slot);
+    return toggle;
 }
 
 function renderColorClusters(clusters) {
@@ -6909,6 +7913,10 @@ function renderColorClusters(clusters) {
             };
 
             hexInput.addEventListener("change", applyHex);
+            // A pasted complete hex applies at once, like the color box's own field.
+            hexInput.addEventListener("paste", () => setTimeout(() => {
+                if (/^#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(hexInput.value.trim())) applyHex();
+            }, 0));
 
             swatch.addEventListener("click", () => {
                 const rgba = slotRgba(color) ?? [0, 0, 0, 255];
@@ -6940,7 +7948,8 @@ function renderColorClusters(clusters) {
             hexControl.append(hexInput);
             if (isSlotEditable(color)) hexControl.append(createHexActionButtons());
 
-            row.append(swatch, name, friendly, hexControl, flags);
+            const surfaceToggle = createSlotSurfaceControls(state.cmdEntries[state.activeCmdIndex], cluster, color);
+            row.append(swatch, name, friendly, hexControl, flags, surfaceToggle);
             list.appendChild(row);
             // One note per material; each slot's own scope stays on its
             // Inactive badge tooltip.
@@ -6982,6 +7991,7 @@ function renderColorClusters(clusters) {
         card.appendChild(list);
         clusterInspector.appendChild(card);
     }
+    reattachSurfacePopover();
 }
 
 
@@ -8056,6 +9066,7 @@ function bindUi() {
                 }
             }
         }
+        syncSurfaceModels(cmd.workingBuffer, cmd.colorClusters);
 
         state.inspectorDirty = false;
         state.surpriseSnapshots.delete(cmd);
@@ -8201,6 +9212,17 @@ function bindUi() {
             });
         });
 
+    for (const [selector, target] of [
+        ["#color-sync-copy-surface", state.colorSync],
+        ["#pattern-sync-copy-surface", state.patternSync],
+        ["#duplicate-copy-surface", state.paletteDuplicate],
+    ]) {
+        const input = document.querySelector(selector);
+        if (!input) continue;
+        input.checked = target.copySurface;
+        input.addEventListener("change", () => { target.copySurface = input.checked; });
+    }
+
     document.querySelector("#apply-color-sync")
         ?.addEventListener("click", () => {
             try {
@@ -8209,7 +9231,12 @@ function bindUi() {
                 showStatus(
                     applyStatus,
                     "good",
-                    `Color Sync applied ${n} slot write${n === 1 ? "" : "s"} on ${cmdDisplayName(state.cmdEntries[state.activeCmdIndex])}.`,
+                    `Color Sync applied ${n} slot write${n === 1 ? "" : "s"} on ${cmdDisplayName(state.cmdEntries[state.activeCmdIndex])}.`
+                    + surfaceCopyMessage(
+                        result.reduce((total, r) => total + (r.surfaceChanged ?? 0), 0),
+                        result.reduce((total, r) => total + (r.surfaceSkipped ?? 0), 0),
+                        state.colorSync.copySurface,
+                    ),
                 );
             } catch (error) {
                 console.error(error);
@@ -8220,7 +9247,7 @@ function bindUi() {
     document.querySelector("#apply-pattern-sync")
         ?.addEventListener("click", () => {
             try {
-                const { applied, skippedDisabled, results } = applyPatternSync();
+                const { applied, skippedDisabled, results, surfaceChanged, surfaceSkipped } = applyPatternSync();
                 const files = results.filter(r => r.status === "applied").length;
                 let msg =
                     `Pattern Sync updated ${applied} slot write${applied === 1 ? "" : "s"}`
@@ -8228,6 +9255,7 @@ function bindUi() {
                 if (skippedDisabled) {
                     msg += ` Skipped ${skippedDisabled} inactive source${skippedDisabled === 1 ? "" : "s"}.`;
                 }
+                msg += surfaceCopyMessage(surfaceChanged, surfaceSkipped, state.patternSync.copySurface);
                 showStatus(applyStatus, "good", msg);
             } catch (error) {
                 console.error(error);
@@ -8248,6 +9276,7 @@ function bindUi() {
                 if (result.enableSkipped) {
                     message += ` ${result.enableSkipped} Enable state${result.enableSkipped === 1 ? "" : "s"} could not be represented by the target structure.`;
                 }
+                message += surfaceCopyMessage(result.surfaceChanged, result.surfaceSkipped, state.paletteDuplicate.copySurface);
                 showStatus(applyStatus, "good", message);
             } catch (error) {
                 console.error(error);
@@ -8569,6 +9598,7 @@ function bindUi() {
     });
 
     bindSurpriseMenuEvents();
+    bindSurfacePopover();
     bindColorPickerEvents();
     bindReplaceColorUi();
     bindReferenceViewerResize();

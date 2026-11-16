@@ -30,6 +30,8 @@ export function makeMdf(materials = [{ name: "esf_Swimwear", colors: [
         const put64 = value => { view.setBigUint64(position, BigInt(value), true); position += 8; };
         const nameOffset = string(material.name);
         const params = material.colors.map(color => ({ name: `CustomizeColor_${color.index}`, values: color.values }));
+        // Optional named scalars, e.g. { name: "CustomizeRoughness_0", value: 0 }.
+        for (const scalar of material.scalars ?? []) params.push({ name: scalar.name, values: [scalar.value] });
         params.push({ name: "SyntheticScalar", values: [0.8125] });
         const parameterNames = params.map(parameter => string(parameter.name));
         cursor = Math.ceil(cursor / 16) * 16;
