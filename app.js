@@ -7645,9 +7645,10 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         const parameterName = surfaceRuntimeName(key, slot.index);
         const switchLabel = document.createElement("label");
         switchLabel.className = "surface-field-switch";
-        switchLabel.title = isDefault
+        const describeSwitch = enabled => isDefault
             ? `${parameterName}: kept in the mod's material file for Color 1.`
-            : `${parameterName}: ${current?.enabled ? "on, overrides the material default" : "off, uses the material default"}.`;
+            : `${parameterName}: ${enabled ? "on, overrides the material default" : "off, uses the material default"}.`;
+        switchLabel.title = describeSwitch(current?.enabled);
         const enabledInput = document.createElement("input");
         enabledInput.type = "checkbox";
         enabledInput.checked = Boolean(current?.enabled);
@@ -7727,6 +7728,7 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
                 const after = readSurfaceField(cmd.workingBuffer, field);
                 enabledInput.checked = after.enabled;
                 line.classList.toggle("is-off", !after.enabled);
+                switchLabel.title = describeSwitch(after.enabled);
                 reset.hidden = !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field);
             }
             updateSurfaceToggle(surfacePopoverState.anchor ?? toggle, cmd, slot);
