@@ -39,6 +39,8 @@ to a server.
   and textures from your own game folder in the browser, follows model swaps
   made through scene files, and can float or go full screen while you edit.
   Sharper textures (up to 1024 × 1024) can be turned on in its advanced settings.
+  Slot Blend Rate, Roughness and Metalness can be edited from the preview and
+  are shown on the model.
 - Randomize the active slots in one material with Surprise Me, or roll the
   single color you are editing from the color box.
 - Add custom local images to the resizable reference viewer.
@@ -46,7 +48,8 @@ to a server.
 - Pattern Sync: apply the same slot mapping across selected CMD palettes.
 - Duplicate Palette: swap all colors from the current active slot to another,
   e.g. swapping EX Color 2 to Color 9.
-- Save and restore color states as portable files. Or enable backups and restore
+- Save and restore color states as portable files. Or enable backups (off by
+  default) and restore
   anytime from exported colors.
 - Jump between Load, Edit, Replace, Sync, and Export from the section rail or
   with the 1-5 keyboard shortcut.

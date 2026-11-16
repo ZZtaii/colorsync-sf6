@@ -10,7 +10,7 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SF6 CMD Color Sync">
     <meta property="og:title" content="SF6 CMD Color Sync Changelog">
-    <meta property="og:description" content="See Blend Rate, Roughness and Metalness editing in v1.5 and earlier releases.">
+    <meta property="og:description" content="See slot settings in the 3D preview in v1.5.1 and earlier releases.">
     <meta property="og:url" content="https://colorsync-sf6.pages.dev/changelog/">
     <meta name="twitter:card" content="summary">
     <title>Changelog | SF6 CMD Color Sync</title>
@@ -87,8 +87,19 @@
             <div class="hero-copy"><div class="eyebrow">Release history</div><h1>Changelog</h1><p class="lead">What shipped with SF6 CMD Color Sync and what is planned next.</p></div>
         </section>
 
+        <section class="release" id="v1-5-1">
+            <div class="release-head"><div><div class="eyebrow">Latest release · November 16, 2026</div><div class="version"><h2>v1.5.1</h2><span class="status shipped">Released</span></div><p class="release-intro">Edit Blend Rate, Roughness, and Metalness from the 3D preview and see them on the model.</p></div></div>
+            <div class="feature-grid" style="margin-top:24px">
+                <article class="feature"><div class="feature-mark">3D</div><h3>Edit slot settings from the preview</h3><p>Each color slot in the 3D preview has a sliders button under its swatch. It opens the same Blend Rate, Roughness, and Metalness window as the material list, placed so the model stays visible.</p></article>
+                <article class="feature"><div class="feature-mark">PBR</div><h3>See Roughness and Metalness on the model</h3><p>The preview now applies each slot's Roughness and Metalness where its mask paints the costume. It approximates the effect without the game's roughness and metal textures.</p></article>
+                <article class="feature"><div class="feature-mark">LIVE</div><h3>Update the model while dragging</h3><p>Blend Rate, Roughness, and Metalness sliders update the 3D preview as you drag instead of when you let go.</p></article>
+                <article class="feature"><div class="feature-mark">FIX</div><h3>Keep the color box visible</h3><p>The floating 3D preview no longer covers the color box, Surprise Me, or the slot settings window when they overlap.</p></article>
+                <article class="feature"><div class="feature-mark">ZIP</div><h3>Color backups are off by default</h3><p>Exported ZIPs no longer include color backups unless you turn them on. ZIPs that already contain backups keep the option on, so exporting them does not remove their backups.</p></article>
+            </div>
+        </section>
+
         <section class="release" id="v1-5">
-            <div class="release-head"><div><div class="eyebrow">Latest release · November 16, 2026</div><div class="version"><h2>v1.5</h2><span class="status shipped">Released</span></div><p class="release-intro">Adjust how strongly each color slot is applied, and how rough and metallic it looks.</p></div></div>
+            <div class="release-head"><div><div class="eyebrow">Previous release · November 16, 2026</div><div class="version"><h2>v1.5</h2><span class="status shipped">Released</span></div><p class="release-intro">Adjust how strongly each color slot is applied, and how rough and metallic it looks.</p></div></div>
             <div class="feature-grid" style="margin-top:24px">
                 <article class="feature"><div class="feature-mark">SLOT</div><h3>Adjust Blend Rate, Roughness and Metalness</h3><p>Every color slot has a slider icon. It opens a small window with Blend Rate (0 to 1) and Roughness and Metalness offsets (-1 to 1), where 0 leaves the material unchanged. Edits appear in Current Changes and can be reverted like colors.</p></article>
                 <article class="feature"><div class="feature-mark">MDF</div><h3>Edit Color 1 of complete mods</h3><p>With a complete mod ZIP loaded, Color 1 settings that are off in the CMD are edited in the mod's own material file, the same way shared color defaults are. The window shows which palettes share the value.</p></article>

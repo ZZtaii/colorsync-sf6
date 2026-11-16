@@ -6996,3 +6996,19 @@ html.bp-full-open .surface-popover { z-index: 2100 !important; }
 /* 3D preview texture detail option. */
 .bp-check { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: .85rem; cursor: pointer; }
 .bp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+
+/* 3D preview: Blend Rate / Roughness / Metalness button under each slot swatch. */
+.bp-slot-surface {
+    position: relative; display: grid; place-items: center; width: 34px; height: 20px; min-height: 0; padding: 0; border-radius: 7px; cursor: pointer;
+    box-sizing: border-box; color: var(--muted); background: transparent; border: 1px solid transparent; transition: background .12s, color .12s;
+}
+.bp-slot-surface .bp-icon { width: 14px; height: 14px; }
+.bp-slot-surface:hover, .bp-slot-surface[aria-expanded="true"] { background: rgba(255, 255, 255, .08); color: var(--text); }
+.bp-slot-surface:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bp-slot-surface.is-edited::after { content: ""; position: absolute; top: 2px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+
+/* The floating 3D preview (z-index 1200) must not cover the color box, Surprise Me or the
+   slot settings pop-up opened over it. */
+body:has(.bp-stage.is-pinned) #custom-color-picker,
+body:has(.bp-stage.is-pinned) .surprise-menu,
+body:has(.bp-stage.is-pinned) .surface-popover { z-index: 1300; }
