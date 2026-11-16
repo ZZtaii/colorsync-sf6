@@ -414,6 +414,9 @@ const zipFileNameInput = document.querySelector("#zip-file-name");
 const zipFileNameField = zipFileNameInput?.closest("label");
 const zipTargetReminder = document.querySelector("#zip-target-reminder");
 const includeColorBackupsInput = document.querySelector("#include-color-backups");
+// The user's own choice for color backups (off unless they turned it on). An imported ZIP that
+// already carries backups shows the option on, without changing this saved choice.
+let colorBackupsPreference = false;
 
 const screenshotDropZone = document.querySelector("#screenshot-drop-zone");
 const screenshotFileInput = document.querySelector("#screenshot-file");
@@ -727,9 +730,11 @@ function applyPersistedUiState() {
         replaceDuplicateExportsInput.checked = saved.replaceDuplicateExports;
     }
     if (includeColorBackupsInput) {
-        includeColorBackupsInput.checked = typeof saved.includeColorBackups === "boolean"
+        // Off unless the user turned it on; a saved choice is kept either way.
+        colorBackupsPreference = typeof saved.includeColorBackups === "boolean"
             ? saved.includeColorBackups
-            : true;
+            : false;
+        includeColorBackupsInput.checked = colorBackupsPreference;
     }
     const pickerBounds = saved.colorPickerBounds;
     if (
@@ -741,6 +746,18 @@ function applyPersistedUiState() {
     ) {
         colorPickerState.savedBounds = { ...pickerBounds };
     }
+}
+
+/**
+ * Exporting without color backups deletes the backup_colors entries an imported ZIP already
+ * has, which shifts archive positions (Fluffy needs a reinstall then). So a ZIP that already
+ * carries backups shows the option on; otherwise it follows the user's saved choice.
+ */
+function syncColorBackupOptionForImport(entries, modRoot) {
+    if (!includeColorBackupsInput) return;
+    const root = String(modRoot || "").toLowerCase();
+    const hasBackups = Object.keys(entries ?? {}).some(path => path.toLowerCase().startsWith(root) && isColorBackupPath(path));
+    includeColorBackupsInput.checked = hasBackups || colorBackupsPreference;
 }
 
 function jumpToSelector(selector) {
@@ -2239,6 +2256,7 @@ async function handleModZip(file) {
                 paletteTarget: targets[0], paletteTargets: targets,
                 colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
             };
+            syncColorBackupOptionForImport(entries, zipEntryDirectory(modinfoPath));
             renderColorBackupPanel();
             selectFallbackPaletteTarget(targets[0]);
             if (colorLibraryHeading) colorLibraryHeading.textContent = "This mod has no CMD palette files.";
@@ -2277,6 +2295,7 @@ async function handleModZip(file) {
             modinfoByRoot: Object.fromEntries(modinfoPaths.map(path => [zipEntryDirectory(path), path])),
             colorBackupManifest: readColorBackupManifest(entries, zipEntryDirectory(modinfoPath)),
         };
+        syncColorBackupOptionForImport(entries, zipEntryDirectory(modinfoPath));
         state.customMaterialMappings = state.importedMod.colorBackupManifest.customMaterials
             .map(mapping => ({ ...mapping, customizeColorIndexes: mapping.customizeColorIndexes.slice() }));
         setImportedModMetadata(
@@ -6436,6 +6455,7 @@ async function unloadCmd(index) {
         state.detectedCharacterName = null;
         state.detectedCostume = null;
         state.importedMod = null;
+        if (includeColorBackupsInput) includeColorBackupsInput.checked = colorBackupsPreference;
         state.customMdfMaterials = [];
         state.customMaterialMappings = [];
         state.materialDefaultTargets = [];
@@ -7411,7 +7431,7 @@ const surfacePopover = document.querySelector("#surface-popover");
 const surfacePopoverBody = document.querySelector("#surface-popover-body");
 const surfacePopoverSlotLabel = document.querySelector("#surface-popover-slot");
 const surfacePopoverClose = document.querySelector("#surface-popover-close");
-const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null };
+const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false };
 
 function surfaceToggleKey(cluster, slot) {
     return `${cluster.instanceId}|${slot.index}`;
@@ -7425,7 +7445,10 @@ function positionSurfacePopover() {
     const rect = anchor.getBoundingClientRect();
     const width = surfacePopover.offsetWidth || 480;
     const height = surfacePopover.offsetHeight || 360;
-    let left = rect.right - width;
+    // From the 3D preview, line up with the right edge of its material panel so the
+    // pop-up covers the material list rather than the model.
+    const previewSide = anchor.closest(".bp-side");
+    let left = (previewSide ? previewSide.getBoundingClientRect().right : rect.right) - width;
     let top = rect.bottom + gap;
     const fitsBelow = top + height <= window.innerHeight - pad;
     const fitsAbove = rect.top - height - gap >= pad;
@@ -7444,7 +7467,7 @@ function positionSurfacePopover() {
 function closeSurfacePopover({ restoreFocus = false } = {}) {
     if (!surfacePopoverState.open) return;
     const { anchor, cmd, slot } = surfacePopoverState;
-    Object.assign(surfacePopoverState, { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null });
+    Object.assign(surfacePopoverState, { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false });
     surfacePopover?.classList.add("hidden");
     surfacePopoverBody?.replaceChildren();
     if (anchor) {
@@ -7458,6 +7481,7 @@ function showSurfacePopover(anchor, cmd, cluster, slot) {
     surfacePopoverState.anchor?.setAttribute("aria-expanded", "false");
     Object.assign(surfacePopoverState, {
         open: true, anchor, cmd, slot, clusterInstanceId: cluster.instanceId, slotIndex: slot.index,
+        fromPreview: Boolean(anchor.closest?.("#browser-preview")),
     });
     anchor.setAttribute("aria-expanded", "true");
     if (surfacePopoverSlotLabel) surfacePopoverSlotLabel.textContent = `${cluster.name} · ${slot.runtimeName} · ${cmdDisplayName(cmd)}`;
@@ -7484,10 +7508,19 @@ function reattachSurfacePopover() {
     if (!surfacePopoverState.open) return;
     const cmd = state.cmdEntries[state.activeCmdIndex];
     const key = `${surfacePopoverState.clusterInstanceId}|${surfacePopoverState.slotIndex}`;
-    const anchor = clusterInspector?.querySelector(`.cluster-slot-surface-toggle[data-surface-slot="${key}"]`);
     const cluster = cmd?.colorClusters.find(candidate => candidate.instanceId === surfacePopoverState.clusterInstanceId);
     const slot = cluster?.colors.find(candidate => candidate.index === surfacePopoverState.slotIndex);
-    if (cmd !== surfacePopoverState.cmd || !anchor || !slot || !anchor.closest("details")?.open) {
+    const previous = surfacePopoverState.anchor;
+    const fromPreview = Boolean(previous?.closest?.("#browser-preview")) || surfacePopoverState.fromPreview;
+    let anchor;
+    if (fromPreview) {
+        const target = cluster ? `${previewMaterialId(cmd, cluster)}|${surfacePopoverState.slotIndex}` : null;
+        anchor = previous?.isConnected ? previous
+            : (target ? [...document.querySelectorAll("#browser-preview .bp-slot-surface")].find(button => button.dataset.surfaceTarget === target) : null);
+    } else {
+        anchor = clusterInspector?.querySelector(`.cluster-slot-surface-toggle[data-surface-slot="${key}"]`);
+    }
+    if (cmd !== surfacePopoverState.cmd || !anchor || !slot || (!fromPreview && !anchor.closest("details")?.open)) {
         closeSurfacePopover();
         return;
     }
@@ -7499,7 +7532,7 @@ function bindSurfacePopover() {
     document.addEventListener("pointerdown", event => {
         if (!surfacePopoverState.open) return;
         if (surfacePopover?.contains(event.target)) return;
-        if (event.target.closest?.(".cluster-slot-surface-toggle")) return;
+        if (event.target.closest?.(".cluster-slot-surface-toggle, .bp-slot-surface")) return;
         dismissUnlessPreviewCamera(event, () => closeSurfacePopover());
     });
     window.addEventListener("keydown", event => {
@@ -7694,15 +7727,25 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
             write({ enabled: enabledInput.checked });
             rerender();
         });
+        let pendingDefaultWrite = null;
         range.addEventListener("input", () => {
             const value = clampSurfaceValue(range.value, key);
             surfaceSliderFill(range);
             number.value = String(Math.round(value * 100) / 100);
-            // CMD bytes are cheap to patch live. A material-file write re-parses the mod's MDFs,
-            // so it waits until the slider is released.
-            if (!isDefault) write({ enabled: true, value });
+            if (!isDefault) {
+                if (write({ enabled: true, value })) scheduleMaterialPreview();
+                return;
+            }
+            // A material-file write re-parses the mod's MDFs, so while dragging it runs at
+            // most every 150 ms; releasing the slider writes the final value.
+            if (pendingDefaultWrite) return;
+            pendingDefaultWrite = setTimeout(() => {
+                pendingDefaultWrite = null;
+                if (write({ enabled: true, value: clampSurfaceValue(range.value, key) })) scheduleMaterialPreview();
+            }, 150);
         });
         range.addEventListener("change", () => {
+            if (pendingDefaultWrite) { clearTimeout(pendingDefaultWrite); pendingDefaultWrite = null; }
             if (isDefault && !write({ enabled: true, value: clampSurfaceValue(range.value, key) })) return;
             rerender();
         });
@@ -8831,6 +8874,8 @@ async function handleSelectedFiles(files) {
     // A fresh CMD-only set should not accidentally carry an unrelated archive.
     if (!state.cmdEntries.length) {
         state.importedMod = null;
+        // A ZIP's own backups no longer apply: back to the user's saved choice.
+        if (includeColorBackupsInput) includeColorBackupsInput.checked = colorBackupsPreference;
         if (zipFileNameInput) zipFileNameInput.value = "";
         hideStatus(colorStateStatus);
         updateZipFileNameField();
@@ -9600,6 +9645,7 @@ function bindUi() {
     });
 
     includeColorBackupsInput?.addEventListener("change", () => {
+        colorBackupsPreference = includeColorBackupsInput.checked;
         saveUiState({ includeColorBackups: includeColorBackupsInput.checked });
     });
 
@@ -9672,6 +9718,16 @@ const browserPreviewPanel = createBrowserPreviewPanel(document.querySelector("#b
         if (section) section.open = true;
         card.open = true; card.classList.add("preview-located");
         card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    },
+    // The sliders button under a preview swatch opens the editor's own Blend Rate /
+    // Roughness / Metalness pop-up for that slot. Returns false when the slot has none.
+    onOpenSurfaceSettings(anchor, materialId, slotIndex) {
+        const cmd = state.cmdEntries[state.activeCmdIndex];
+        const cluster = cmd?.colorClusters?.find(c => previewMaterialId(cmd, c) === materialId);
+        const slot = cluster?.colors?.find(c => c.index === slotIndex);
+        if (!slot?.surface) return false;
+        openSurfacePopover(anchor, cmd, cluster, slot);
+        return true;
     },
     // A swatch beside the 3D view opens the editor's own color picker for that slot, exactly like
     // the swatch in the material list below. Returns false when the slot cannot be edited.

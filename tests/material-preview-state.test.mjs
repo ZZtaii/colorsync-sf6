@@ -119,3 +119,10 @@ test('edited Blend Rate in the live slot model replaces the value parsed at load
     slot.surface.blendRate.enabled=false;
     assert.deepEqual(buildMaterialPreviewState(state).materials[0].scalarParameters,[]);
 });
+test('slot Roughness and Metalness that are on are sent to the preview',()=>{
+    const {state,slot}=fixture(false);
+    slot.surface={shared:false,roughness:{enabled:true,value:.3},metalness:{enabled:false,value:.9}};
+    assert.deepEqual(buildMaterialPreviewState(state).materials[0].scalarParameters,[{name:'CustomizeRoughness_0',values:[.3],enabled:true,source:'cmd'}]);
+    slot.surfaceDefaultTargets={metalness:[{customizeScalars:[{key:'metalness',index:0,value:-.5}]}]};
+    assert.deepEqual(buildMaterialPreviewState(state).materials[0].scalarParameters.at(-1),{name:'CustomizeMetal_0',values:[-.5],enabled:true,source:'mod-mdf'});
+});
