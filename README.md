@@ -38,6 +38,7 @@ to a server.
 - See the costume in a 3D preview that follows your edits. It reads stock parts
   and textures from your own game folder in the browser, follows model swaps
   made through scene files, and can float or go full screen while you edit.
+  Sharper textures (up to 1024 × 1024) can be turned on in its advanced settings.
 - Randomize the active slots in one material with Surprise Me, or roll the
   single color you are editing from the color box.
 - Add custom local images to the resizable reference viewer.

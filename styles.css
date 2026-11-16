@@ -6992,3 +6992,7 @@ html.bp-full-open .surface-popover { z-index: 2100 !important; }
     grid-column: 1 / -1;
     margin: -34px -11px -17px auto !important;
 }
+
+/* 3D preview texture detail option. */
+.bp-check { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); font-size: .85rem; cursor: pointer; }
+.bp-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
