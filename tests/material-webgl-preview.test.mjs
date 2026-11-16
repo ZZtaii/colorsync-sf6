@@ -13,3 +13,4 @@ test('linear color precision preserved',()=>{const c=[.21586050011389926,.001,.9
 test('roughness and metalness bounded',()=>{const m=normalizePreviewMaterial({roughness:0,metalness:8});assert.equal(m.roughness,.05);assert.equal(m.metalness,1);});
 test('mask mapping must be explicit',()=>assert.throws(()=>normalizePreviewMaterial({maskLayers:[{}]}),/explicit/));
 test('mask supports valid data mapping without guessing',()=>{const layer={channel:2,texture:{},color:[1,0,0,1],blendRate:.5};assert.equal(normalizePreviewMaterial({maskLayers:[layer]}).maskLayers.length,1);});
+test('roughness scale, hair offsets and metal flag are bounded',()=>{const m=normalizePreviewMaterial({roughnessScale:9,roughnessOffset:-5,metalnessOffset:Number.NaN,albedoMetal:'yes'});assert.equal(m.roughnessScale,2);assert.equal(m.roughnessOffset,-2);assert.equal(m.metalnessOffset,0);assert.equal(m.albedoMetal,false);});
