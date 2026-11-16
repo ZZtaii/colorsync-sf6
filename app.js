@@ -7434,15 +7434,31 @@ const surfacePopoverClose = document.querySelector("#surface-popover-close");
 const surfacePopoverTitle = document.querySelector("#surface-popover-title");
 const surfacePopoverInfo = document.querySelector("#surface-popover-info");
 const surfacePopoverHelp = document.querySelector("#surface-popover-help");
-const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false };
+const surfacePopoverState = { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false, moved: false };
+// Material values a setting falls back to while it is off (stock MDF defaults).
+const SURFACE_OFF_VALUES = { blendRate: 1, roughness: 0, metalness: 0 };
 
 function surfaceToggleKey(cluster, slot) {
     return `${cluster.instanceId}|${slot.index}`;
 }
 
+function clampSurfacePopover(left, top) {
+    const pad = 10;
+    const width = surfacePopover.offsetWidth;
+    const height = surfacePopover.offsetHeight;
+    surfacePopover.style.left = `${Math.min(Math.max(pad, window.innerWidth - width - pad), Math.max(pad, left))}px`;
+    surfacePopover.style.top = `${Math.min(Math.max(pad, window.innerHeight - height - pad), Math.max(pad, top))}px`;
+}
+
 function positionSurfacePopover() {
     const anchor = surfacePopoverState.anchor;
     if (!surfacePopover || !anchor?.isConnected) return;
+    // Once dragged, it stays where it was put (kept on screen as its height changes).
+    if (surfacePopoverState.moved) {
+        const rect = surfacePopover.getBoundingClientRect();
+        clampSurfacePopover(rect.left, rect.top);
+        return;
+    }
     const pad = 10;
     const gap = 8;
     const rect = anchor.getBoundingClientRect();
@@ -7470,7 +7486,8 @@ function positionSurfacePopover() {
 function closeSurfacePopover({ restoreFocus = false } = {}) {
     if (!surfacePopoverState.open) return;
     const { anchor, cmd, slot } = surfacePopoverState;
-    Object.assign(surfacePopoverState, { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false });
+    Object.assign(surfacePopoverState, { open: false, anchor: null, cmd: null, slot: null, clusterInstanceId: null, slotIndex: null, fromPreview: false, moved: false });
+    surfacePopover?.classList.remove("is-dragging");
     surfacePopover?.classList.add("hidden");
     surfacePopoverBody?.replaceChildren();
     if (anchor) {
@@ -7533,6 +7550,25 @@ function reattachSurfacePopover() {
 
 function bindSurfacePopover() {
     surfacePopoverClose?.addEventListener("click", () => closeSurfacePopover({ restoreFocus: true }));
+    // Drag from anywhere that is not a control, like the color box. Phones use a fixed bottom sheet.
+    let drag = null;
+    surfacePopover?.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || window.matchMedia("(max-width: 600px)").matches) return;
+        if (event.target.closest("input, button, a, .surface-popover-help")) return;
+        const rect = surfacePopover.getBoundingClientRect();
+        drag = { id: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+        surfacePopover.setPointerCapture(event.pointerId);
+        surfacePopover.classList.add("is-dragging");
+        event.preventDefault();
+    });
+    surfacePopover?.addEventListener("pointermove", event => {
+        if (!drag || event.pointerId !== drag.id) return;
+        surfacePopoverState.moved = true;
+        clampSurfacePopover(event.clientX - drag.dx, event.clientY - drag.dy);
+    });
+    const endDrag = () => { drag = null; surfacePopover?.classList.remove("is-dragging"); };
+    surfacePopover?.addEventListener("pointerup", endDrag);
+    surfacePopover?.addEventListener("pointercancel", endDrag);
     // The explanation stays one click away instead of under every slot.
     surfacePopoverInfo?.addEventListener("click", () => {
         const open = surfacePopoverHelp?.hidden ?? false;
@@ -7633,7 +7669,8 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
         if (!current && !reason) reason = `This slot has no ${label} setting.`;
         if (reason) reasons.add(reason);
         const editable = isDefault ? Boolean(defaults) : Boolean(current) && canEditSlotSurface(cmd, slot, key);
-        const shownValue = isDefault ? defaults?.value : current?.value;
+        // An off setting shows the material value it falls back to; changing it turns it on.
+        const shownValue = isDefault ? defaults?.value : (current?.enabled ? current.value : SURFACE_OFF_VALUES[key]);
 
         const line = document.createElement("div");
         line.className = "surface-field";
@@ -7643,22 +7680,16 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
 
         // The game parameter name stays in the tooltip, not on screen.
         const parameterName = surfaceRuntimeName(key, slot.index);
-        const switchLabel = document.createElement("label");
+        const switchLabel = document.createElement("span");
         switchLabel.className = "surface-field-switch";
         const describeSwitch = enabled => isDefault
             ? `${parameterName}: kept in the mod's material file for Color 1.`
-            : `${parameterName}: ${enabled ? "on, overrides the material default" : "off, uses the material default"}.`;
+            : `${parameterName}: ${enabled ? "overrides the material default" : "uses the material default until you change it"}.`;
         switchLabel.title = describeSwitch(current?.enabled);
-        const enabledInput = document.createElement("input");
-        enabledInput.type = "checkbox";
-        enabledInput.checked = Boolean(current?.enabled);
-        enabledInput.disabled = isDefault || !editable;
-        enabledInput.hidden = isDefault;
-        enabledInput.setAttribute("aria-label", `Override ${label} for ${slot.runtimeName}`);
         const name = document.createElement("span");
         name.className = "surface-field-name";
         name.textContent = label;
-        switchLabel.append(enabledInput, name);
+        switchLabel.append(name);
         if (isDefault) {
             const tag = document.createElement("span");
             tag.className = "surface-field-tag";
@@ -7726,7 +7757,6 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
                 reset.hidden = !surfaceDefaultValues(cmd, slot, key)?.edited;
             } else {
                 const after = readSurfaceField(cmd.workingBuffer, field);
-                enabledInput.checked = after.enabled;
                 line.classList.toggle("is-off", !after.enabled);
                 switchLabel.title = describeSwitch(after.enabled);
                 reset.hidden = !surfaceFieldBytesDiffer(baselineBuffer, cmd.workingBuffer, field);
@@ -7743,10 +7773,6 @@ function renderSlotSurfacePanel(panel, cmd, slot, toggle) {
             }
         };
 
-        enabledInput.addEventListener("change", () => {
-            write({ enabled: enabledInput.checked });
-            rerender();
-        });
         let pendingDefaultWrite = null;
         range.addEventListener("input", () => {
             const value = clampSurfaceValue(range.value, key);

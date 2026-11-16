@@ -1,6 +1,6 @@
 # EMV / Freecam → SF6 Color Sync
 
-Download the current [exporter v1.8 ZIP](SF6-Color-Sync-REFramework-v1.8.zip).
+Download the current [exporter v1.8 from Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files&file_id=14814).
 The exporter is also available on
 [Nexus Mods](https://www.nexusmods.com/streetfighter6/mods/3837?tab=files).
 If EMV Engine and Lua Freecam are not set up yet, follow the
@@ -168,6 +168,7 @@ References: [EMV Engine SILVER](https://github.com/SilverEzredes/EMV-Engine-SILV
 ## Rebuilding the Fluffy package
 
 Run `node integrations/reframework/build-fluffy-mod.mjs` from the repository
-root after updating the Lua script or this guide. The ZIP contains root mod
-metadata, the autorun script and a guide under `reframework/data/SF6ColorSync`.
+root after updating the Lua script. The ZIP contains only the root mod metadata
+and the autorun script. REFramework creates `reframework/data/SF6ColorSync`
+when an export is first saved.
 The builder verifies every archived file against its source bytes.

@@ -7028,3 +7028,14 @@ html.bp-full-open .surface-popover { z-index: 2100 !important; }
 body:has(.bp-stage.is-pinned) #custom-color-picker,
 body:has(.bp-stage.is-pinned) .surprise-menu,
 body:has(.bp-stage.is-pinned) .surface-popover { z-index: 1300; }
+
+/* Surface pop-up (16 Nov): matching ⓘ / × icons on the title line, and the window can be dragged. */
+.surface-popover-header { align-items: center; }
+.surface-popover .surface-popover-close { font-size: 0; }
+.surface-popover .surface-popover-close svg { width: 16px; height: 16px; }
+.surface-popover .surface-popover-close:hover { color: var(--accent-hover); }
+.surface-popover-header { cursor: grab; }
+.surface-popover.is-dragging, .surface-popover.is-dragging * { cursor: grabbing !important; user-select: none; }
+.surface-field-switch { cursor: default; }
+.surface-field.is-off .surface-field-name { color: var(--muted); }
+@media (max-width: 600px) { .surface-popover-header { cursor: default; } }

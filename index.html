@@ -296,7 +296,7 @@
                 </summary>
                 <div class="collapsible-section-body">
                     <p>Paste a color string from Color Sync or use <strong>Copy for Color Sync</strong> in REFramework’s SF6 Color Sync panel after editing in EMV / Lua Freecam. Preview and apply the colors to the active CMD.</p>
-                    <p class="freecam-setup-link"><a href="./integrations/reframework/SF6-Color-Sync-REFramework-v1.8.zip">Download exporter v1.8</a> · <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a> · <a href="./integrations/reframework/" target="_blank" rel="noopener">Quick setup guide</a></p>
+                    <p class="freecam-setup-link"><a href="https://www.nexusmods.com/streetfighter6/mods/3837?tab=files&amp;file_id=14814" target="_blank" rel="noopener">Download exporter v1.8 <span aria-hidden="true">↗</span></a> · <a href="https://www.youtube.com/watch?v=fKdNqtsoxu0&amp;t=2s" target="_blank" rel="noopener">EMV Engine and Lua Freecam setup video</a> · <a href="./integrations/reframework/" target="_blank" rel="noopener">Quick setup guide</a></p>
                     <p>Enable exporter v1.8 in Fluffy and restart SF6. Open Materials before editing, then use <strong>SF6 Color Sync → Copy for Color Sync</strong> in REFramework. One edited character is selected automatically.</p>
                     <p>Choose the active CMD you want to update. Matching materials and CustomizeColor slots will receive the imported colors.</p>
                     <p>Loose CMDs and colors-only ZIPs import into the selected palette. Load the complete mod ZIP to import shared material defaults; the preview shows their scope, and the full mod ZIP keeps those edits.</p>
@@ -1245,9 +1245,9 @@
             <button id="surface-popover-info" type="button" class="surface-popover-icon" aria-label="What these settings do" aria-expanded="false" aria-controls="surface-popover-help" title="What these settings do">
                 <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="10" cy="6.4" r="1" fill="currentColor"/></svg>
             </button>
-            <button id="surface-popover-close" type="button" class="surface-popover-close" aria-label="Close Blend Rate, Roughness and Metalness">×</button>
+            <button id="surface-popover-close" type="button" class="surface-popover-icon surface-popover-close" aria-label="Close Blend Rate, Roughness and Metalness" title="Close"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
         </div>
-        <p id="surface-popover-help" class="surface-popover-help" hidden>Blend Rate sets how strongly this slot's color is applied (the material default is usually 1). Roughness and Metalness are added to the material's own values; 0 changes nothing. Turn a setting off to use the material default. Hover a name to see the game parameter.</p>
+        <p id="surface-popover-help" class="surface-popover-help" hidden>Blend Rate sets how strongly this slot's color is applied (the material default is usually 1). Roughness and Metalness are added to the material's own values; 0 changes nothing. A dimmed setting uses the material default until you change it, and ↺ restores the original. Hover a name to see the game parameter; drag the window to move it.</p>
         <div id="surface-popover-body" class="surface-popover-body"></div>
     </div>
 
