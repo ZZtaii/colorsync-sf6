@@ -6455,6 +6455,7 @@ async function unloadCmd(index) {
         state.detectedCharacterName = null;
         state.detectedCostume = null;
         state.importedMod = null;
+        if (includeColorBackupsInput) includeColorBackupsInput.checked = colorBackupsPreference;
         state.customMdfMaterials = [];
         state.customMaterialMappings = [];
         state.materialDefaultTargets = [];
@@ -8873,6 +8874,8 @@ async function handleSelectedFiles(files) {
     // A fresh CMD-only set should not accidentally carry an unrelated archive.
     if (!state.cmdEntries.length) {
         state.importedMod = null;
+        // A ZIP's own backups no longer apply: back to the user's saved choice.
+        if (includeColorBackupsInput) includeColorBackupsInput.checked = colorBackupsPreference;
         if (zipFileNameInput) zipFileNameInput.value = "";
         hideStatus(colorStateStatus);
         updateZipFileNameField();
@@ -9716,8 +9719,6 @@ const browserPreviewPanel = createBrowserPreviewPanel(document.querySelector("#b
         card.open = true; card.classList.add("preview-located");
         card.scrollIntoView({ block: "nearest", behavior: "smooth" });
     },
-    // A swatch beside the 3D view opens the editor's own color picker for that slot, exactly like
-    // the swatch in the material list below. Returns false when the slot cannot be edited.
     // The sliders button under a preview swatch opens the editor's own Blend Rate /
     // Roughness / Metalness pop-up for that slot. Returns false when the slot has none.
     onOpenSurfaceSettings(anchor, materialId, slotIndex) {
@@ -9728,6 +9729,8 @@ const browserPreviewPanel = createBrowserPreviewPanel(document.querySelector("#b
         openSurfacePopover(anchor, cmd, cluster, slot);
         return true;
     },
+    // A swatch beside the 3D view opens the editor's own color picker for that slot, exactly like
+    // the swatch in the material list below. Returns false when the slot cannot be edited.
     onOpenColorPicker(anchor, materialId, slotIndex) {
         const cmd = state.cmdEntries[state.activeCmdIndex];
         const cluster = cmd?.colorClusters?.find(c => previewMaterialId(cmd, c) === materialId);
