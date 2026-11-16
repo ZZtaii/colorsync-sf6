@@ -2975,6 +2975,26 @@ function readSlotSurfaceStates(cmd, slot) {
  * same way Color Sync writes Color 1 color defaults; a source that is off has
  * no value of its own, so it leaves the target's default alone.
  */
+/**
+ * Dry-run the material-file writes a sync copy would make (writeMaterialDefaultScalar
+ * returns a patched copy and leaves the record alone), so an unwritable target
+ * throws before any color or setting of the sync is applied.
+ */
+function preflightSlotSurfaceCopy(cmd, slot, states) {
+    for (const key of SURFACE_KEYS) {
+        const source = states?.[key];
+        if (!source?.enabled) continue;
+        const route = surfaceEditRoute(cmd, slot, key);
+        if (route.kind !== "default") continue;
+        for (const target of route.targets) {
+            const record = state.materialDefaultBuffers.get(target.sourcePath);
+            if (!record) throw new Error("Load the complete mod ZIP to edit this shared material default.");
+            writeMaterialDefaultScalar(record.workingBuffer, zipEntryBaseName(target.sourcePath), target.name,
+                key, slot.index, source.value, { materialIndex: target.materialIndex });
+        }
+    }
+}
+
 function copySlotSurface(cmd, slot, states, { allowDefault = false } = {}) {
     const result = { changed: 0, skipped: 0 };
     for (const key of SURFACE_KEYS) {
@@ -3173,6 +3193,7 @@ function applyColorSync() {
     targetSlotIndexes.forEach(index => {
         const slot = getColorSlot(cmd, targetMaterial, index);
         if (slot) planColorSlotEdit(cmd, slot, rgba);
+        if (slot && surfaceStates) preflightSlotSurfaceCopy(cmd, slot, surfaceStates);
     });
 
     for (const slotIndex of targetSlotIndexes) {
@@ -3236,6 +3257,7 @@ function applyPatternSync() {
         for (const slotIndex of targetSlotIndexes) {
             const slot = getColorSlot(cmd, targetMaterial, slotIndex);
             if (slot) planColorSlotEdit(cmd, slot, slotRgba(source));
+            if (slot && state.patternSync.copySurface) preflightSlotSurfaceCopy(cmd, slot, readSlotSurfaceStates(cmd, source));
         }
     }
 
@@ -3410,11 +3432,12 @@ function applyPaletteDuplicate() {
     let enableSkipped = 0;
     let surfaceChanged = 0;
     let surfaceSkipped = 0;
+    // One pre-copy buffer per target palette; undo restores surface fields from it.
+    const surfaceBefore = new Map();
 
     for (const { index: cmdIndex, cmd, plan } of targetPlans) {
+        if (plan.operations.some(operation => operation.surface)) surfaceBefore.set(cmdIndex, cmd.workingBuffer.slice(0));
         for (const operation of plan.operations) {
-            // Exact byte snapshots of the target's surface fields for undo.
-            const beforeSurfaceBytes = operation.surface ? snapshotSurfaceBytes(cmd.workingBuffer, operation.targetSlot) : [];
             const targetOffset = operation.targetSlot.color.absoluteOffset;
             const beforeRgba = rgbaAtOffset(cmd.workingBuffer, targetOffset);
             const beforeEnabled = rawSlotEnabled(cmd, operation.targetSlot);
@@ -3463,7 +3486,7 @@ function applyPaletteDuplicate() {
                     enableByteLength,
                     beforeEnabled,
                     beforeEnableBytes,
-                    beforeSurfaceBytes: surface.changed ? beforeSurfaceBytes : [],
+                    surfaceChanged: surface.changed > 0,
                 });
             }
         }
@@ -3473,6 +3496,7 @@ function applyPaletteDuplicate() {
         ? {
             operations: undoOperations,
             targets: targetPlans.length,
+            surfaceBefore,
         }
         : null;
     renderDuplicateUndoButton();
@@ -3505,26 +3529,13 @@ function surfaceCopyMessage(changed, skipped, enabled) {
     return message;
 }
 
-function snapshotSurfaceBytes(buffer, slot) {
-    const snapshot = [];
+/** Restore a slot's surface fields from a saved buffer. True when any bytes changed. */
+function restoreSlotSurfaceFrom(buffer, saved, slot) {
+    let changed = false;
     for (const key of SURFACE_KEYS) {
         const field = slot?.surface?.[key];
-        if (!field || !isSurfaceFieldWritable(buffer, field)) continue;
-        for (const { absoluteOffset, byteLength } of [field.enable, field.valueField]) {
-            const length = Math.max(1, byteLength);
-            snapshot.push({ offset: absoluteOffset, bytes: new Uint8Array(buffer.slice(absoluteOffset, absoluteOffset + length)) });
-        }
-    }
-    return snapshot;
-}
-
-function restoreSurfaceBytes(buffer, snapshot) {
-    let changed = false;
-    const bytes = new Uint8Array(buffer);
-    for (const { offset, bytes: saved } of snapshot ?? []) {
-        if (offset < 0 || offset + saved.length > bytes.length) continue;
-        if (saved.some((value, index) => bytes[offset + index] !== value)) changed = true;
-        bytes.set(saved, offset);
+        if (!field || !surfaceFieldBytesDiffer(saved, buffer, field)) continue;
+        changed = copySurfaceFieldBytes(buffer, saved, field) || changed;
     }
     return changed;
 }
@@ -3561,7 +3572,8 @@ function undoLastPaletteDuplicate() {
             if (operation.targetSlot.enable) operation.targetSlot.enable.value = operation.beforeEnabled;
         }
 
-        const surfaceRestored = restoreSurfaceBytes(cmd.workingBuffer, operation.beforeSurfaceBytes);
+        const surfaceSaved = operation.surfaceChanged ? undo.surfaceBefore?.get(operation.cmdIndex) : null;
+        const surfaceRestored = surfaceSaved ? restoreSlotSurfaceFrom(cmd.workingBuffer, surfaceSaved, operation.targetSlot) : false;
 
         if (!rgbaEquals(currentRgba, operation.beforeRgba) || enableChanged || surfaceRestored) changed += 1;
     }
@@ -4510,6 +4522,13 @@ function freecamColorCell(rgba, enabled = true) {
     return cell;
 }
 
+// Freecam routes that write a shared material default: a color vector ("default")
+// or a Blend Rate / Roughness / Metalness float ("default-surface").
+const MATERIAL_DEFAULT_ROUTES = new Set(["default", "default-surface"]);
+function isMaterialDefaultRoute(route) {
+    return MATERIAL_DEFAULT_ROUTES.has(route);
+}
+
 function prepareFreecamColorImport(documentData, cmd) {
     const sourcePlan = planFreecamColorImport(documentData, cmd);
     const issues = sourcePlan.issues.slice();
@@ -4559,7 +4578,7 @@ function prepareFreecamColorImport(documentData, cmd) {
         }
     }
     const conflicts = new Set();
-    const defaultOperations = operations.filter(operation => operation.route === "default" || operation.route === "default-surface");
+    const defaultOperations = operations.filter(operation => isMaterialDefaultRoute(operation.route));
     for (let i = 0; i < defaultOperations.length; i += 1) for (let j = i + 1; j < defaultOperations.length; j += 1) {
         const left = defaultOperations[i];
         const right = defaultOperations[j];
@@ -4583,7 +4602,7 @@ function prepareFreecamColorImport(documentData, cmd) {
             if (operation.changed) writeSurfaceBytes(cmdBuffer, operation.field, { enabled: true, value: operation.value });
             continue;
         }
-        if (operation.route === "default" || operation.route === "default-surface") {
+        if (isMaterialDefaultRoute(operation.route)) {
             for (const write of operation.defaultWrites) {
                 const { target } = write;
                 const record = state.materialDefaultBuffers.get(target.sourcePath);
@@ -4634,7 +4653,7 @@ function previewFreecamColors() {
     freecamPreview.append(title);
     const changed = plan.operations.filter(operation => operation.changed);
     const summary = document.createElement("p");
-    const defaults = changed.filter(operation => operation.route === "default" || operation.route === "default-surface").length;
+    const defaults = changed.filter(operation => isMaterialDefaultRoute(operation.route)).length;
     const surfaces = changed.filter(operation => operation.route === "surface").length;
     const cmdColors = changed.length - defaults - surfaces;
     summary.textContent = `${cmdColors} CMD color${cmdColors === 1 ? "" : "s"}, ${surfaces} Blend Rate/Roughness/Metalness setting${surfaces === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"} to update; ${plan.operations.length - changed.length} already match; ${plan.issues.length} skipped.`
@@ -4677,7 +4696,7 @@ function previewFreecamColors() {
                 row.append(name, freecamColorCell(operation.beforeRgba, operation.beforeEnabled), freecamColorCell(operation.rgba));
             }
             const destination = document.createElement("td");
-            const isDefault = operation.route === "default" || operation.route === "default-surface";
+            const isDefault = isMaterialDefaultRoute(operation.route);
             destination.textContent = isDefault ? "Shared material default" : cmdDisplayName(cmd);
             if (operation.route === "default-surface") {
                 const scope = document.createElement("p");
@@ -4767,7 +4786,7 @@ function applyFreecamColors() {
     state.inspectorDirty = true;
     resetFreecamPreview();
     refreshAfterFreecamImport();
-    const defaults = operations.filter(operation => operation.route === "default" || operation.route === "default-surface").length;
+    const defaults = operations.filter(operation => isMaterialDefaultRoute(operation.route)).length;
     const surfaces = operations.filter(operation => operation.route === "surface").length;
     const cmdColors = operations.length - defaults - surfaces;
     showStatus(freecamStatus, "good", `Applied ${cmdColors} CMD color${cmdColors === 1 ? "" : "s"}, ${surfaces} Blend Rate/Roughness/Metalness setting${surfaces === 1 ? "" : "s"} and ${defaults} shared default${defaults === 1 ? "" : "s"}. `

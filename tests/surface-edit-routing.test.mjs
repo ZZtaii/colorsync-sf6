@@ -16,7 +16,7 @@ const names = [
     "originalMaterialDefaultColor", "materialDefaultEntries", "refreshMaterialDefaultTargets",
     "cmdSemanticBaseline", "surfaceEditBlockedReason", "canEditSlotSurface", "setSlotSurface",
     "slotSurfaceChanges", "revertSlotSurface", "readSlotSurfaceStates", "copySlotSurface",
-    "validateSavedSlotSurface", "snapshotSurfaceBytes", "restoreSurfaceBytes",
+    "validateSavedSlotSurface", "restoreSlotSurfaceFrom",
     "surfaceEditRoute", "materialDefaultScalar", "originalMaterialDefaultScalar", "writeSurfaceDefault", "revertSurfaceDefault",
 ];
 const functions = names.map(name => {
@@ -136,8 +136,7 @@ test("copies carry exact source states and count fields a locked target cannot t
     assert.deepEqual(locked.cmd.workingBuffer, locked.cmd.originalBuffer);
     assert.deepEqual({ ...locked.api.copySlotSurface(locked.cmd, locked.head, states) }, { changed: 2, skipped: 0 });
 
-    const snapshot = locked.api.snapshotSurfaceBytes(locked.cmd.originalBuffer, locked.head);
-    assert.equal(locked.api.restoreSurfaceBytes(locked.cmd.workingBuffer, snapshot), true);
+    assert.equal(locked.api.restoreSlotSurfaceFrom(locked.cmd.workingBuffer, locked.cmd.originalBuffer, locked.head), true);
     assert.deepEqual(locked.cmd.workingBuffer, locked.cmd.originalBuffer);
 });
 
