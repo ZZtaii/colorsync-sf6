@@ -5699,8 +5699,13 @@ main.page-width {
     margin-top: 18px;
 }
 
-.export-backup-hint {
+.export-backup-hint,
+.export-unedited-hint {
     margin-left: 25px;
+}
+
+.export-unedited-option {
+    margin-top: 12px;
 }
 
 /* ============================================================

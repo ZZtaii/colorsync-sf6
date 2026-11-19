@@ -902,6 +902,14 @@
                 Keeps original and pre-export color snapshots under <code>backup_colors</code> so they can be restored later. Off by default; on for ZIPs that already contain backups, so exporting keeps them.
             </p>
 
+            <label class="export-duplicate-option export-unedited-option">
+                <input id="include-unedited-colors" type="checkbox">
+                <span>Include unedited colors in exported ZIP</span>
+            </label>
+            <p class="export-duplicate-hint export-unedited-hint">
+                Puts every loaded color in both ZIP exports, including stock colors from <code>SF6 Colors.zip</code> you haven't changed. Off by default.
+            </p>
+
             <p class="modder-files-notice" role="note">
                 <svg class="modder-files-notice-icon" viewBox="0 0 24 24" aria-hidden="true">
                     <circle cx="12" cy="12" r="9"></circle>

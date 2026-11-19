@@ -414,6 +414,7 @@ const zipFileNameInput = document.querySelector("#zip-file-name");
 const zipFileNameField = zipFileNameInput?.closest("label");
 const zipTargetReminder = document.querySelector("#zip-target-reminder");
 const includeColorBackupsInput = document.querySelector("#include-color-backups");
+const includeUneditedColorsInput = document.querySelector("#include-unedited-colors");
 // The user's own choice for color backups (off unless they turned it on). An imported ZIP that
 // already carries backups shows the option on, without changing this saved choice.
 let colorBackupsPreference = false;
@@ -735,6 +736,9 @@ function applyPersistedUiState() {
             ? saved.includeColorBackups
             : false;
         includeColorBackupsInput.checked = colorBackupsPreference;
+    }
+    if (includeUneditedColorsInput) {
+        includeUneditedColorsInput.checked = saved.includeUneditedColors === true;
     }
     const pickerBounds = saved.colorPickerBounds;
     if (
@@ -4971,7 +4975,8 @@ function buildExportChangelog(changedCmds) {
 function updateExportButtons() {
     const hasChanges = hasMaterialDefaultEdits({ sinceExport: true }) || state.cmdEntries.some(cmd => diffBuffers(exportBaseline(cmd), cmd.workingBuffer).length > 0);
     const hasCmds = state.cmdEntries.length > 0;
-    if (buildButton) buildButton.disabled = !hasChanges;
+    const exportsUnedited = includeUneditedColorsInput?.checked === true && Boolean(state.importedMod) && hasCmds;
+    if (buildButton) buildButton.disabled = !hasChanges && !exportsUnedited;
     if (exportCmdButton) {
         exportCmdButton.disabled = !hasChanges || hasMaterialDefaultEdits();
         exportCmdButton.title = hasMaterialDefaultEdits() ? "Shared material defaults need a mod ZIP, which includes the material files." : "Export modified CMD files";
@@ -5023,6 +5028,8 @@ async function buildModZip({ colorsOnly = false } = {}) {
         throw new Error("Load a mod ZIP before exporting a colors-only ZIP.");
     }
     const includeColorBackups = includeColorBackupsInput?.checked !== false;
+    // On: every loaded CMD goes in, stock SF6 Colors.zip palettes included.
+    const includeUnedited = includeUneditedColorsInput?.checked === true;
     const modinfoPath = state.importedMod?.modinfoPath || "modinfo.ini";
     const modRoot = zipEntryDirectory(modinfoPath);
     const requiredMaterialPaths = new Set([...state.materialDefaultBuffers.entries()]
@@ -5075,9 +5082,11 @@ async function buildModZip({ colorsOnly = false } = {}) {
 
         let paths = importedCmdPaths(cmd);
         // EX/DX palettes pulled in from SF6 Colors.zip are only exported once
-        // edited, so exports don't fill up with stock copies.
+        // edited, so exports don't fill up with stock copies (unless the
+        // "Include unedited colors" toggle is on).
         if (
-            cmd.metadata.variant !== "standard"
+            !includeUnedited
+            && cmd.metadata.variant !== "standard"
             && !paths.some(path => state.importedMod?.hadLiveCmd?.[path])
             && diffBuffers(cmd.semanticBaselineBuffer || cmd.originalBuffer, cmd.workingBuffer).length === 0
         ) continue;
@@ -5090,7 +5099,7 @@ async function buildModZip({ colorsOnly = false } = {}) {
                 + `${cmd.metadata.costumeFolder}/`
                 + cmd.file.name);
 
-        if (colorsOnly || changed) {
+        if (colorsOnly || changed || includeUnedited) {
             paths.forEach(path => { files[path] = new Uint8Array(cmd.workingBuffer.slice(0)); });
             includedCmds.push({ cmd, paths });
             exported.push({
@@ -9682,6 +9691,11 @@ function bindUi() {
     includeColorBackupsInput?.addEventListener("change", () => {
         colorBackupsPreference = includeColorBackupsInput.checked;
         saveUiState({ includeColorBackups: includeColorBackupsInput.checked });
+    });
+
+    includeUneditedColorsInput?.addEventListener("change", () => {
+        saveUiState({ includeUneditedColors: includeUneditedColorsInput.checked });
+        updateExportButtons();
     });
 
     document.querySelectorAll("[data-jump]").forEach(link => {
