@@ -243,8 +243,8 @@ const state = {
         copySurface: false,
     },
 
-    // Duplicate Palette: one complete palette into selected standard CMDs.
-    // EX/DX CMDs may be selected as sources, but never as targets.
+    // Duplicate Palette: one complete palette into the other loaded CMDs.
+    // Standard, EX and DX palettes can each be a source or a target.
     // scopeMode "selected" narrows the copy to scopeSlots instead of the
     // whole palette.
     paletteDuplicate: {
@@ -2209,7 +2209,6 @@ async function handleModZip(file) {
                 metadata
                 && (metadata.variant === "ex" || metadata.variant === "dx")
                 && metadata.paletteNumber >= 1
-                && metadata.paletteNumber <= 10
                 && standardScopeKeys.has(
                     `${metadata.esfId}|${metadata.costumeFolder}|${metadata.version}`,
                 ),
@@ -2356,7 +2355,7 @@ async function handleModZip(file) {
             parserStatus,
             mdfRefresh.fallbackWarning ? "warn" : "good",
             `Imported ${cmdEntries.length} CMD file${cmdEntries.length === 1 ? "" : "s"} from ${modTargetName(selectedTarget || { root: modRoot, modinfoPath }, entries)}.`
-            + (referenceCmdPaths.length ? ` Loaded ${referenceCmdPaths.length} EX/DX reference file${referenceCmdPaths.length === 1 ? "" : "s"}.` : "")
+            + (referenceCmdPaths.length ? ` Includes ${referenceCmdPaths.length} EX/DX file${referenceCmdPaths.length === 1 ? "" : "s"}.` : "")
             + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} non-selected variant file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
             + " Other mod files will be preserved on ZIP export."
             + mdfRefresh.fallbackWarning,
@@ -2377,24 +2376,29 @@ async function loadCmdsFromColorLibrary(file) {
         const libraryEntries = await unzipArchive(new Uint8Array(zipData));
         const neededPalettes = new Set(missingPaletteNumbers(target));
         if (!neededPalettes.size) throw new Error("All Colors 1–10 are already loaded from this mod.");
-        let ignoredVariantCount = 0;
-        const matchingByPalette = new Map();
+        // Missing standard Colors 1–10 plus every EX/DX palette for this
+        // outfit that the mod does not already carry. Loaded files win.
+        const loadedKeys = new Set(state.cmdEntries.map(cmd => cmdIdentityKey(cmd.metadata)));
+        const matchingByKey = new Map();
         Object.entries(libraryEntries).forEach(([path, bytes]) => {
             const meta = parseCmdFilename(zipEntryBaseName(path));
             if (meta?.esfId !== target.esfId || meta.costumeFolder !== target.costumeFolder) return;
-            if (meta.variant !== "standard") {
-                ignoredVariantCount += 1;
-                return;
-            }
-            if (!neededPalettes.has(meta.paletteNumber) || matchingByPalette.has(meta.paletteNumber)) return;
-            matchingByPalette.set(meta.paletteNumber, [path, bytes]);
+            if (meta.variant === "standard" && !neededPalettes.has(meta.paletteNumber)) return;
+            if (meta.variant !== "standard" && meta.paletteNumber < 1) return;
+            const key = cmdIdentityKey(meta);
+            if (loadedKeys.has(key) || matchingByKey.has(key)) return;
+            matchingByKey.set(key, [path, bytes]);
         });
-        const matching = [...matchingByPalette.values()]
-            .sort(([a], [b]) => (
-                parseCmdFilename(zipEntryBaseName(a)).paletteNumber
-                - parseCmdFilename(zipEntryBaseName(b)).paletteNumber
+        const matching = [...matchingByKey.values()]
+            .sort(([a], [b]) => compareValidatedFiles(
+                { metadata: parseCmdFilename(zipEntryBaseName(a)) },
+                { metadata: parseCmdFilename(zipEntryBaseName(b)) },
             ));
-        if (!matching.length) {
+        const addedStandardCount = matching.filter(([path]) => (
+            parseCmdFilename(zipEntryBaseName(path)).variant === "standard"
+        )).length;
+        const addedVariantCount = matching.length - addedStandardCount;
+        if (!addedStandardCount) {
             throw new Error(`SF6 Colors.zip has none of the missing standard CMD files for ${SF6_CHARACTERS[target.esfId] || target.esfId}, Outfit ${Number(target.costumeFolder)}.`);
         }
         const cmdFiles = matching.map(([path, bytes]) => new File([bytes], zipEntryBaseName(path), { type: "application/octet-stream" }));
@@ -2445,8 +2449,8 @@ async function loadCmdsFromColorLibrary(file) {
         showStatus(
             parserStatus,
             mdfRefresh.fallbackWarning ? "warn" : "good",
-            `Kept ${state.cmdEntries.length - matching.length} CMD file${state.cmdEntries.length - matching.length === 1 ? "" : "s"} from the mod and added ${matching.length} missing color${matching.length === 1 ? "" : "s"} from SF6 Colors.zip.`
-            + (ignoredVariantCount ? ` Ignored ${ignoredVariantCount} EX/DX CMD file${ignoredVariantCount === 1 ? "" : "s"}.` : "")
+            `Kept ${state.cmdEntries.length - matching.length} CMD file${state.cmdEntries.length - matching.length === 1 ? "" : "s"} from the mod and added ${addedStandardCount} missing color${addedStandardCount === 1 ? "" : "s"} from SF6 Colors.zip.`
+            + (addedVariantCount ? ` Also added ${addedVariantCount} EX/DX color${addedVariantCount === 1 ? "" : "s"}.` : "")
             + mdfRefresh.fallbackWarning,
         );
     } finally {
@@ -2648,12 +2652,12 @@ async function handleFiles(fileCollection) {
         msg += ` Skipped ${skipCount}.`;
     }
     if (referenceAddedCount > 0) {
-        msg += ` ${referenceAddedCount} EX/DX file${referenceAddedCount === 1 ? " is" : "s are"} reference-only; edits may not apply in-game.`;
+        msg += ` Includes ${referenceAddedCount} EX/DX file${referenceAddedCount === 1 ? "" : "s"}.`;
     }
 
     showStatus(
         parserStatus,
-        (skipCount > 0 || referenceAddedCount > 0) ? "warn" : (addedCount > 0 ? "good" : "warn"),
+        skipCount > 0 ? "warn" : (addedCount > 0 ? "good" : "warn"),
         msg,
     );
     revealStatus(parserStatus);
@@ -3072,7 +3076,7 @@ function isDuplicatePaletteSource(cmd) {
         meta
         && (meta.variant === "standard" || meta.variant === "ex" || meta.variant === "dx")
         && meta.paletteNumber >= 1
-        && meta.paletteNumber <= 10,
+        && (meta.variant !== "standard" || meta.paletteNumber <= 10),
     );
 }
 
@@ -3100,11 +3104,9 @@ function listDuplicatePaletteTargetIndexes(sourceIndex = state.paletteDuplicate.
 
     return state.cmdEntries
         .map((cmd, index) => ({ cmd, index }))
-        .filter(({ cmd }) => (
-            cmd.metadata.variant === "standard"
-            && cmd.metadata.paletteNumber >= 1
-            && cmd.metadata.paletteNumber <= 10
-            && cmd.metadata.paletteNumber !== source.metadata.paletteNumber
+        .filter(({ cmd, index }) => (
+            index !== sourceIndex
+            && isDuplicatePaletteSource(cmd)
             && duplicatePaletteScopeMatches(source, cmd)
         ))
         .map(({ index }) => index);
@@ -5065,7 +5067,6 @@ async function buildModZip({ colorsOnly = false } = {}) {
     }
 
     for (const cmd of state.cmdEntries) {
-        if (colorsOnly && isReferenceCmdMetadata(cmd.metadata)) continue;
         const baseline = exportBaseline(cmd);
         const semanticChanges = semanticChangesSince(cmd, baseline);
         const changed = diffBuffers(baseline, cmd.workingBuffer).length > 0;
@@ -5073,6 +5074,13 @@ async function buildModZip({ colorsOnly = false } = {}) {
         const changes = diffBuffers(baseline, cmd.workingBuffer);
 
         let paths = importedCmdPaths(cmd);
+        // EX/DX palettes pulled in from SF6 Colors.zip are only exported once
+        // edited, so exports don't fill up with stock copies.
+        if (
+            cmd.metadata.variant !== "standard"
+            && !paths.some(path => state.importedMod?.hadLiveCmd?.[path])
+            && diffBuffers(cmd.semanticBaselineBuffer || cmd.originalBuffer, cmd.workingBuffer).length === 0
+        ) continue;
         if (colorsOnly) {
             const ownedPaths = paths.filter(path => path.toLowerCase().startsWith(modRoot.toLowerCase()));
             if (ownedPaths.length) paths = ownedPaths;
@@ -5937,14 +5945,10 @@ function renderFileSummary() {
     state.cmdEntries.forEach((cmd, index) => {
         const row = document.createElement("div");
         row.className = "file-list-item";
-        if (isReferenceCmdMetadata(cmd.metadata)) row.classList.add("dx-reference");
         row.innerHTML =
             `<strong>${cmdDisplayName(cmd)}</strong>`
             + `<span>${cmd.file.name} · ${formatBytes(cmd.file.size)}</span>`
-            + `<span>${cmd.colorClusters.length} materials</span>`
-            + (isReferenceCmdMetadata(cmd.metadata)
-                ? `<span class="dx-reference-note">${cmd.metadata.variant.toUpperCase()} reference only · edits may not apply in-game</span>`
-                : "");
+            + `<span>${cmd.colorClusters.length} materials</span>`;
         const unload = document.createElement("button");
         unload.type = "button";
         unload.className = "secondary-button file-unload-button";
@@ -6538,22 +6542,10 @@ function renderActiveCmdControls() {
 }
 
 function updateDxReferenceWarning() {
+    // EX/DX palettes are ordinary editable palettes, so there is no warning.
     if (!dxReferenceWarning) return;
-
-    const referenceCmds = state.cmdEntries.filter(cmd => isReferenceCmdMetadata(cmd.metadata));
-    if (!referenceCmds.length) {
-        dxReferenceWarning.classList.add("hidden");
-        dxReferenceWarning.textContent = "";
-        return;
-    }
-
-    const activeReference = state.cmdEntries[state.activeCmdIndex];
-    const activeIsReference = isReferenceCmdMetadata(activeReference?.metadata);
-    const referenceVariants = [...new Set(referenceCmds.map(cmd => cmd.metadata.variant.toUpperCase()))].join("/");
-    dxReferenceWarning.classList.remove("hidden");
-    dxReferenceWarning.innerHTML = activeIsReference
-        ? `<strong>${activeReference.metadata.variant.toUpperCase()} reference file:</strong> Edits may not apply in-game. Use this file as reference only.`
-        : `<strong>${referenceVariants} files loaded:</strong> Their edits may not apply in-game. Use them as reference only.`;
+    dxReferenceWarning.classList.add("hidden");
+    dxReferenceWarning.textContent = "";
 }
 
 function stepActiveCmd(delta) {
@@ -8458,10 +8450,7 @@ function renderDuplicateSourceDropdown() {
         option.className = "custom-select-option";
         option.setAttribute("role", "option");
         option.setAttribute("aria-selected", String(candidate.index === state.paletteDuplicate.sourceCmdIndex));
-        const referenceVariant = candidate.cmd.metadata.variant === "standard"
-            ? ""
-            : ` - ${candidate.cmd.metadata.variant.toUpperCase()} reference`;
-        option.textContent = cmdDisplayName(candidate.cmd) + referenceVariant;
+        option.textContent = cmdDisplayName(candidate.cmd);
         if (candidate.index === state.paletteDuplicate.sourceCmdIndex) option.classList.add("selected");
         option.addEventListener("click", () => {
             state.paletteDuplicate.sourceCmdIndex = candidate.index;
@@ -8834,11 +8823,9 @@ function renderSyncPanels() {
     const duplicateNote = document.querySelector("#duplicate-palette-note");
     if (duplicateNote) {
         if (!duplicateSource) {
-            duplicateNote.textContent = "Load a standard, EX, or DX palette as the source, then choose standard target palettes.";
-        } else if (duplicateSource.metadata.variant !== "standard") {
-            duplicateNote.textContent = `${duplicateSource.metadata.variant.toUpperCase()} source selected. Its raw colors and Enable states will be copied as reference data; EX/DX files cannot be targets.`;
+            duplicateNote.textContent = "Load a standard, EX, or DX palette as the source, then choose target palettes.";
         } else {
-            duplicateNote.textContent = "Copies matching material colors and Enable states into the selected standard palettes.";
+            duplicateNote.textContent = "Copies matching material colors and Enable states into the selected palettes.";
         }
     }
 
