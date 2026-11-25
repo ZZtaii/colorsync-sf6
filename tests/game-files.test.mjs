@@ -151,6 +151,22 @@ test('game folder yields PAKs in load order and a loose natives source that outr
     assert.equal(looseFolderSource(fakeDirectory({})).name, 'natives folder');
 });
 
+test('PAK fingerprint changes when a mod manager rewrites a PAK or adds a patch PAK', async () => {
+    const { sourcesFromDirectory, pakFingerprint } = await import('../lib/game-folder.js');
+    const tree = { 're_chunk_000.pak': noise(16, 1), dlc: { 're_dlc_stm_1.pak': noise(16, 3) } };
+    const first = pakFingerprint((await sourcesFromDirectory(fakeDirectory(tree))).pakFiles);
+    assert.equal(pakFingerprint((await sourcesFromDirectory(fakeDirectory(tree))).pakFiles), first, 'an unchanged folder keeps its fingerprint');
+    tree['re_chunk_000.pak.patch_001.pak'] = noise(16, 2);
+    const found = await sourcesFromDirectory(fakeDirectory(tree));
+    assert.deepEqual(found.pakFiles.map(f => f.name), ['re_chunk_000.pak', 're_chunk_000.pak.patch_001.pak', 're_dlc_stm_1.pak']);
+    const withPatch = pakFingerprint(found.pakFiles);
+    assert.notEqual(withPatch, first, 'a new patch PAK is noticed');
+    tree['re_chunk_000.pak'] = noise(24, 1);
+    assert.notEqual(pakFingerprint((await sourcesFromDirectory(fakeDirectory(tree))).pakFiles), withPatch, 'a rewritten base PAK is noticed');
+    const at = lastModified => [{ name: 're_chunk_000.pak', size: 16, lastModified }];
+    assert.notEqual(pakFingerprint(at(1)), pakFingerprint(at(2)), 'same size but a newer change time is noticed');
+});
+
 test('gatherer prefers later PAKs and reports unreadable files without stopping', async () => {
     const root = 'natives/stm/product/model/esf/esf009/003', mesh = `${root}/00/esf009_003_00.mesh.230110883`;
     const base = { read: async path => path === mesh ? noise(8, 1) : null };
