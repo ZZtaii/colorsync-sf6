@@ -167,6 +167,27 @@ test('PAK fingerprint changes when a mod manager rewrites a PAK or adds a patch 
     assert.notEqual(pakFingerprint(at(1)), pakFingerprint(at(2)), 'same size but a newer change time is noticed');
 });
 
+test('a folder-upload list (games under Program Files) gives the same PAKs and natives files', async () => {
+    const { sourcesFromFileList } = await import('../lib/game-folder.js');
+    const file = (path, bytes = noise(4)) => ({ name: path.split('/').pop(), size: bytes.length, webkitRelativePath: path, arrayBuffer: async () => bytes.slice().buffer });
+    const mesh = 'natives/stm/product/model/esf/esf009/003/00/esf009_003_00.mesh.230110883';
+    // The visitor picked "common", one level above the game folder.
+    const list = [
+        file('common/Street Fighter 6/re_chunk_000.pak.patch_001.pak'), file('common/Street Fighter 6/re_chunk_000.pak'),
+        file('common/Street Fighter 6/dlc/re_dlc_stm_2.pak'), file('common/Street Fighter 6/dlc/re_dlc_stm_1.pak'),
+        file('common/Street Fighter 6/dlc/old/backup.pak'), file('common/Street Fighter 6/StreetFighter6.exe'),
+        file(`common/Street Fighter 6/${mesh.replace('esf009_003_00', 'ESF009_003_00')}`, noise(8, 9)),
+        file('common/Other Game/re_chunk_000.pak.patch_009.pak'), file('common/Other Game/sub/re_chunk_000.pak'),
+    ];
+    const found = sourcesFromFileList(list);
+    assert.deepEqual(found.pakFiles.map(f => f.webkitRelativePath.split('/').slice(2).join('/')),
+        ['re_chunk_000.pak', 're_chunk_000.pak.patch_001.pak', 'dlc/re_dlc_stm_1.pak', 'dlc/re_dlc_stm_2.pak']);
+    assert.deepEqual(await found.loose.read(mesh), noise(8, 9), 'natives files are found whatever their case');
+    assert.equal(await found.loose.read('natives/stm/missing.tex.1'), null);
+    assert.equal(sourcesFromFileList([file('Street Fighter 6/re_chunk_000.pak')]).loose, null);
+    assert.throws(() => sourcesFromFileList([file('Downloads/notes.txt')]), /No re_chunk_000\.pak/);
+});
+
 test('gatherer prefers later PAKs and reports unreadable files without stopping', async () => {
     const root = 'natives/stm/product/model/esf/esf009/003', mesh = `${root}/00/esf009_003_00.mesh.230110883`;
     const base = { read: async path => path === mesh ? noise(8, 1) : null };

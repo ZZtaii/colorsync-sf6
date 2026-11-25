@@ -6636,6 +6636,8 @@ main.page-width {
 /* Footer: status line plus the folded panels */
 .bp-footer { display: flex; align-items: center; gap: 10px; min-height: 32px; }
 .bp-footer-actions { display: flex; gap: 4px; flex: none; }
+.bp-other-way { flex: none; min-height: 32px; padding: 4px 12px; font-size: 0.82rem; }
+.bp-other-way[hidden] { display: none; }
 .bp-status { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 0.82rem; line-height: 1.4; color: var(--muted-strong); }
 .bp-status.is-error { color: var(--danger); }
 .bp-panel { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--panel-soft); }
