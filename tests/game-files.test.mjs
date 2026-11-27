@@ -197,6 +197,20 @@ test('picked PAK files are put in load order and need the main game file', async
     assert.throws(() => sourcesFromPickedPaks([file('re_dlc_stm_1.pak')]), /re_chunk_000\.pak/);
 });
 
+test('remembered PAK handles ask for permission only when told to', async () => {
+    const { pakPermission, filesFromHandles, inLoadOrder } = await import('../lib/game-folder.js');
+    const handle = (name, state) => ({ name, asked: 0, queryPermission: async () => state, async requestPermission() { this.asked++; return 'granted'; }, getFile: async () => ({ name }) });
+    const granted = [handle('re_chunk_000.pak', 'granted')];
+    assert.equal(await pakPermission(granted), 'granted');
+    const waiting = [handle('re_chunk_000.pak', 'granted'), handle('re_dlc_stm_1.pak', 'prompt')];
+    assert.equal(await pakPermission(waiting), 'prompt');
+    assert.equal(waiting[1].asked, 0, 'no prompt without a click');
+    assert.equal(await pakPermission(waiting, true), 'granted');
+    assert.equal(waiting[1].asked, 1);
+    assert.deepEqual(inLoadOrder([handle('re_dlc_stm_1.pak'), handle('re_chunk_000.pak')]).map(h => h.name), ['re_chunk_000.pak', 're_dlc_stm_1.pak']);
+    assert.deepEqual((await filesFromHandles(waiting)).map(f => f.name), ['re_chunk_000.pak', 're_dlc_stm_1.pak']);
+});
+
 test('gatherer prefers later PAKs and reports unreadable files without stopping', async () => {
     const root = 'natives/stm/product/model/esf/esf009/003', mesh = `${root}/00/esf009_003_00.mesh.230110883`;
     const base = { read: async path => path === mesh ? noise(8, 1) : null };
