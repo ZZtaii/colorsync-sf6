@@ -12,13 +12,15 @@ const bytes = text => new TextEncoder().encode(text);
 function noise(length, seed = 1) { const out = new Uint8Array(length); let s = seed >>> 0; for (let i = 0; i < length; i++) { s = Math.imul(s, 1664525) + 1013904223 >>> 0; out[i] = s >>> 24; } return out; }
 
 /** Builds a KPKA v4 PAK in memory. files: [{ path, data, compression: 'none'|'deflate'|'zstd' }] */
-function buildPak(files, { major = 4, features = 0 } = {}) {
+function buildPak(files, { major = 4, features = 0, sorted = false, hide = [] } = {}) {
+    // sorted: table in (upper, lower) hash order like the game's; hide: paths whose hashes a mod manager zeroed.
+    if (sorted) files = [...files].sort((a, b) => { const x = pakPathHashes(a.path), y = pakPathHashes(b.path); return x.upper - y.upper || x.lower - y.lower; });
     const stored = files.map(f => f.compression === 'deflate' ? deflateSync(f.data) : f.compression === 'zstd' ? new Uint8Array(zlib.zstdCompressSync(f.data)) : f.data);
     const head = new Uint8Array(16 + files.length * 48), view = new DataView(head.buffer);
     view.setUint32(0, 0x414B504B, true); view.setUint8(4, major); view.setUint16(6, features, true); view.setUint32(8, files.length, true);
     let offset = head.length;
     files.forEach((file, i) => {
-        const at = 16 + i * 48, { lower, upper } = pakPathHashes(file.path);
+        const at = 16 + i * 48, { lower, upper } = hide.includes(file.path) ? { lower: 0, upper: 0 } : pakPathHashes(file.path);
         view.setUint32(at, lower, true); view.setUint32(at + 4, upper, true);
         view.setBigUint64(at + 8, BigInt(offset), true); view.setBigUint64(at + 16, BigInt(stored[i].length), true); view.setBigUint64(at + 24, BigInt(file.data.length), true);
         view.setBigUint64(at + 32, BigInt({ none: 0, deflate: 1, zstd: 2 }[file.compression]), true);
@@ -186,6 +188,40 @@ test('a folder-upload list (games under Program Files) gives the same PAKs and n
     assert.equal(await found.loose.read('natives/stm/missing.tex.1'), null);
     assert.equal(sourcesFromFileList([file('Street Fighter 6/re_chunk_000.pak')]).loose, null);
     assert.throws(() => sourcesFromFileList([file('Downloads/notes.txt')]), /No re_chunk_000\.pak/);
+});
+
+test('stock files a mod manager hid (hashes zeroed) are found by their place in the sorted table', async () => {
+    const magic = (text, length = 64) => { const out = noise(length, text.length); out.set(bytes(text)); return out; };
+    const root = 'natives/stm/product/model/esf/esf028/001';
+    const body = `${root}/01/esf028_001_01.mesh.230110883`, mdf = `${root}/01/esf028_001_01_v00.mdf2.31`;
+    const files = [
+        { path: body, data: magic('MESH'), compression: 'none' },
+        { path: mdf, data: magic('MDF\0'), compression: 'deflate' },
+        ...Array.from({ length: 40 }, (_, i) => ({ path: `natives/stm/other/file_${i}.tex.241101895`, data: magic('TEX\0'), compression: 'none' })),
+    ];
+    const pak = await openPak(buildPak(files, { sorted: true, hide: [body, mdf] }).source);
+    assert.equal(pak.hiddenCount, 2);
+    assert.equal(await pak.read(body), null, 'hidden by name');
+    assert.deepEqual(await pak.readHidden(body), files[0].data, 'found again in its gap');
+    assert.deepEqual(await pak.readHidden(mdf), files[1].data);
+    assert.equal(await pak.readHidden(`${root}/01/esf028_001_01.mesh.240306278`), null, 'a path the game never had finds nothing of its type');
+    assert.equal(await pak.readHidden('natives/stm/other/file_3.tex.241101895'), null, 'live files are read normally, not as hidden');
+    // An unsorted table gives no reliable gaps: nothing hidden is read.
+    const unsorted = await openPak(buildPak([...files].reverse(), { hide: [body, mdf] }).source);
+    assert.equal(await unsorted.readHidden(body), null);
+
+    // The gatherer reads the hidden body only because the game's own scene names it.
+    const scene = (() => {
+        const text = `product/model/esf/esf028/001/01/esf028_001_01.mesh\0product/model/esf/esf028/001/01/esf028_001_01_v00.mdf2\0`;
+        const out = new Uint8Array(16 + text.length * 2); out.set(bytes('SCN\0'));
+        for (let i = 0; i < text.length; i++) out[16 + i * 2] = text.charCodeAt(i);
+        return out;
+    })();
+    const withScene = await openPak(buildPak([...files, { path: 'natives/stm/product/charparam/esf/esf028/esf028v00.scn.20', data: scene, compression: 'none' }], { sorted: true, hide: [body, mdf] }).source);
+    const result = await gatherCostumeFiles({ paks: [withScene], character: 'esf028', costume: '001' });
+    assert.equal(result.scene?.source, 'game');
+    assert.deepEqual(result.parts.map(p => [p.folder, p.source]), [['01', 'game']]);
+    assert.equal(result.hidden, 2, 'the body and its material file');
 });
 
 test('picked PAK files are put in load order and need the main game file', async () => {
