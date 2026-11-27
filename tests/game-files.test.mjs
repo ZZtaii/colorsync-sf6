@@ -188,6 +188,15 @@ test('a folder-upload list (games under Program Files) gives the same PAKs and n
     assert.throws(() => sourcesFromFileList([file('Downloads/notes.txt')]), /No re_chunk_000\.pak/);
 });
 
+test('picked PAK files are put in load order and need the main game file', async () => {
+    const { sourcesFromPickedPaks } = await import('../lib/game-folder.js');
+    const file = name => ({ name, size: 4, lastModified: 1 });
+    const found = sourcesFromPickedPaks([file('re_dlc_stm_2.pak'), file('re_chunk_000.pak.patch_002.pak'), file('notes.txt'), file('re_chunk_000.pak'), file('re_chunk_000.pak.patch_001.pak'), file('re_dlc_stm_1.pak')]);
+    assert.deepEqual(found.pakFiles.map(f => f.name), ['re_chunk_000.pak', 're_chunk_000.pak.patch_001.pak', 're_chunk_000.pak.patch_002.pak', 're_dlc_stm_1.pak', 're_dlc_stm_2.pak']);
+    assert.equal(found.loose, null);
+    assert.throws(() => sourcesFromPickedPaks([file('re_dlc_stm_1.pak')]), /re_chunk_000\.pak/);
+});
+
 test('gatherer prefers later PAKs and reports unreadable files without stopping', async () => {
     const root = 'natives/stm/product/model/esf/esf009/003', mesh = `${root}/00/esf009_003_00.mesh.230110883`;
     const base = { read: async path => path === mesh ? noise(8, 1) : null };
